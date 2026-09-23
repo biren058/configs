@@ -1,165 +1,163 @@
-private static final String SERVICE_TYPE_DELIMITER = ":";
-private static final int BASIC_DATE_LENGTH = 8;
+package com.uhg.payer.product.utils
 
-private static void setTimeframeQualifier(
-        final String serviceTypeName,
-        final String costShareCode,
-        final Bucket bucket,
-        final Copay copay) {
+import com.uhg.payer.product.exception.TokenException
+import com.uhg.payer.product.validation.ValidationUtils
+import spock.lang.Specification
+import spock.lang.Unroll
 
-    if (isInvalidInput(serviceTypeName, costShareCode, bucket, copay)) {
-        return;
+import java.util.concurrent.atomic.AtomicReference
+
+class ValidationUtilsSpec extends Specification {
+
+    @Unroll
+    def "formatStringMoney should convert '#money' to '#expectedResult'"() {
+        given:
+        def validationUtils = new ValidationUtils()
+
+        when:
+        String result = validationUtils.formatStringMoney(money)
+
+        then:
+        result == expectedResult
+
+        where:
+        money        || expectedResult
+        "1000"       || "1000.00"
+        "100"        || "100.00"
+        "1"          || "1.00"
+
+        "0"          || "0.00"
+        "0.0"        || "0.00"
+        "0.00"       || "0.00"
+        "0.000"      || "0.00"
+
+        "-0"         || "0.00"
+        "-0.0"       || "0.00"
+        "-0.00"      || "0.00"
+        "-0.000"     || "0.00"
+
+        "1.1"        || "1.10"
+        "10.5"       || "10.50"
+        "100.25"     || "100.25"
+        "999.99"     || "999.99"
+
+        "-1"         || "-1.00"
+        "-1.5"       || "-1.50"
+        "-10.50"     || "-10.50"
+        "-999.99"    || "-999.99"
+
+        "0.01"       || "0.01"
+        "-0.01"      || "-0.01"
+
+        "1000000"    || "1000000.00"
+        "9999999.99" || "9999999.99"
     }
 
-    extractServiceTypeDetails(serviceTypeName)
-            .filter(details -> isMatchingBucket(
-                    details.serviceCode(),
-                    costShareCode,
-                    bucket))
-            .map(ServiceTypeDetails::timeframeQualifier)
-            .filter(qualifier -> !qualifier.isBlank())
-            .ifPresent(qualifier ->
-                    copay.setTimeframeQualifier(
-                            new CodeDescPairType(qualifier, "")
-                    ));
-}
 
-private static boolean isInvalidInput(
-        final String serviceTypeName,
-        final String costShareCode,
-        final Bucket bucket,
-        final Copay copay) {
+    @Unroll
+    def "formatStringMoney should safely handle invalid input '#money'"() {
+        given:
+        def validationUtils = new ValidationUtils()
 
-    return serviceTypeName == null
-            || serviceTypeName.isBlank()
-            || costShareCode == null
-            || costShareCode.isBlank()
-            || bucket == null
-            || copay == null;
-}
+        when:
+        String result = validationUtils.formatStringMoney(money)
 
-private static Optional<ServiceTypeDetails> extractServiceTypeDetails(
-        final String serviceTypeName) {
+        then:
+        noExceptionThrown()
+        result == expectedResult
 
-    final String[] parts =
-            serviceTypeName.split(SERVICE_TYPE_DELIMITER, -1);
-
-    /*
-     * Format:
-     * Outpatient Hospital:4704:ADM
-     * :4704:ADM
-     */
-    if (parts.length == 3 && !containsDateRange(parts)) {
-        return createServiceTypeDetails(parts[1], parts[2]);
+        where:
+        money   || expectedResult
+        null    || null
+        ""      || ""
+        " "     || " "
+        "abc"   || "abc"
+        "10abc" || "10abc"
+        "--1"   || "--1"
     }
 
-    /*
-     * Format:
-     * Outpatient Hospital:20200101:20251231:4704:ADM
-     * :20200101:20251231:4704:ADM
-     */
-    if (parts.length == 5 && containsDateRange(parts)) {
-        return createServiceTypeDetails(parts[3], parts[4]);
+
+    @Unroll
+    def "formatStringMoney should handle surrounding whitespace '#money'"() {
+        given:
+        def validationUtils = new ValidationUtils()
+
+        when:
+        String result = validationUtils.formatStringMoney(money)
+
+        then:
+        result == expectedResult
+
+        where:
+        money       || expectedResult
+        " 100 "     || "100.00"
+        " 10.50 "   || "10.50"
+        " -0.00 "   || "0.00"
+        " -10.50 "  || "-10.50"
     }
 
-    /*
-     * Examples intentionally ignored:
-     *
-     * Outpatient Hospital
-     * Outpatient Hospital:20200101:20251231
-     */
-    return Optional.empty();
-}
 
-private static Optional<ServiceTypeDetails> createServiceTypeDetails(
-        final String serviceCode,
-        final String timeframeQualifier) {
+    def "getCqlAuthorization should return bearer authorization when token is available"() {
+        given:
+        def validationUtils = new ValidationUtils()
 
-    final String normalizedServiceCode =
-            serviceCode == null ? "" : serviceCode.trim();
+        def tokenController = Mock(GraphQlOAuthTokenController)
 
-    final String normalizedQualifier =
-            timeframeQualifier == null ? "" : timeframeQualifier.trim();
+        validationUtils.graphQlOAuthTokenController = tokenController
 
-    if (normalizedServiceCode.isEmpty()
-            || normalizedQualifier.isEmpty()) {
-        return Optional.empty();
+        tokenController.getCqlOAuthToken() >>
+                new AtomicReference<String>("test-access-token")
+
+        when:
+        String result = validationUtils.getCqlAuthorization()
+
+        then:
+        result == OAuthConstants.BEARER.getValue() + "test-access-token"
+
+        and:
+        1 * tokenController.getCqlOAuthToken()
     }
 
-    return Optional.of(
-            new ServiceTypeDetails(
-                    normalizedServiceCode,
-                    normalizedQualifier
-            ));
-}
 
-private static boolean containsDateRange(final String[] parts) {
+    def "getCqlAuthorization should throw TokenException when token reference is null"() {
+        given:
+        def validationUtils = new ValidationUtils()
 
-    return parts.length >= 3
-            && isBasicDate(parts[1])
-            && isBasicDate(parts[2]);
-}
+        def tokenController = Mock(GraphQlOAuthTokenController)
 
-private static boolean isBasicDate(final String value) {
+        validationUtils.graphQlOAuthTokenController = tokenController
 
-    if (value == null) {
-        return false;
+        tokenController.getCqlOAuthToken() >> null
+
+        when:
+        validationUtils.getCqlAuthorization()
+
+        then:
+        thrown(TokenException)
+
+        and:
+        1 * tokenController.getCqlOAuthToken()
     }
 
-    final String date = value.trim();
 
-    return date.length() == BASIC_DATE_LENGTH
-            && date.chars().allMatch(Character::isDigit);
-}
+    def "getCqlAuthorization should handle AtomicReference containing null token"() {
+        given:
+        def validationUtils = new ValidationUtils()
 
-private static boolean isMatchingBucket(
-        final String serviceCode,
-        final String costShareCode,
-        final Bucket bucket) {
+        def tokenController = Mock(GraphQlOAuthTokenController)
 
-    final String serviceCodeSuffix =
-            extractServiceCodeSuffix(serviceCode);
+        validationUtils.graphQlOAuthTokenController = tokenController
 
-    if (serviceCodeSuffix.isEmpty()) {
-        return false;
+        tokenController.getCqlOAuthToken() >>
+                new AtomicReference<String>(null)
+
+        when:
+        String result = validationUtils.getCqlAuthorization()
+
+        then:
+        result == OAuthConstants.BEARER.getValue() + null
+
+        and:
+        1 * tokenController.getCqlOAuthToken()
     }
-
-    final String expectedBucketCode =
-            costShareCode.trim() + serviceCodeSuffix + "1";
-
-    final String actualBucketCode =
-            Objects.toString(bucket.getBucketCode(), "").trim();
-
-    return actualBucketCode.equals(expectedBucketCode);
-}
-
-private static String extractServiceCodeSuffix(
-        final String serviceCode) {
-
-    if (serviceCode == null || serviceCode.isBlank()) {
-        return "";
-    }
-
-    final String normalizedCode = serviceCode.trim();
-
-    final String suffix = normalizedCode.length() >= 2
-            ? normalizedCode.substring(normalizedCode.length() - 2)
-            : normalizedCode;
-
-    /*
-     * Examples:
-     *
-     * 4704 -> "04" -> "4"
-     * 4712 -> "12"
-     * 4707 -> "07" -> "7"
-     * 5    -> "5"
-     */
-    return suffix.length() == 2 && suffix.charAt(0) == '0'
-            ? suffix.substring(1)
-            : suffix;
-}
-
-private record ServiceTypeDetails(
-        String serviceCode,
-        String timeframeQualifier) {
 }
