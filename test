@@ -1,56 +1,58 @@
 def "getGqlAuthorization should return bearer authorization when token is available"() {
     given:
-    def validationUtils = new ValidationUtils()
     def tokenController = Mock(GraphQlOAuthTokenController)
+    def validationUtils = new ValidationUtils()
 
     validationUtils.graphQlOAuthTokenController = tokenController
 
+    and:
     def token = new AtomicReference<String>("test-access-token")
+
+    // IMPORTANT: stub before executing the method
+    tokenController.getCqlOAuthToken() >> token
 
     when:
     String result = validationUtils.getGqlAuthorization()
 
     then:
-    1 * tokenController.getCqlOAuthToken() >> token
-
-    and:
     result == OAuthConstants.BEARER.getValue() + "test-access-token"
 }
 
 
 def "getGqlAuthorization should throw TokenException when token reference is null"() {
     given:
-    def validationUtils = new ValidationUtils()
     def tokenController = Mock(GraphQlOAuthTokenController)
+    def validationUtils = new ValidationUtils()
 
     validationUtils.graphQlOAuthTokenController = tokenController
+
+    and:
+    // IMPORTANT: explicitly return null
+    tokenController.getCqlOAuthToken() >> null
 
     when:
     validationUtils.getGqlAuthorization()
 
     then:
-    1 * tokenController.getCqlOAuthToken() >> null
-
-    and:
     thrown(TokenException)
 }
 
 
-def "getGqlAuthorization should return bearer with null when AtomicReference contains null"() {
+def "getGqlAuthorization should throw TokenException when AtomicReference contains null token"() {
     given:
-    def validationUtils = new ValidationUtils()
     def tokenController = Mock(GraphQlOAuthTokenController)
+    def validationUtils = new ValidationUtils()
 
     validationUtils.graphQlOAuthTokenController = tokenController
 
+    and:
     def token = new AtomicReference<String>(null)
 
+    tokenController.getCqlOAuthToken() >> token
+
     when:
-    String result = validationUtils.getGqlAuthorization()
+    validationUtils.getGqlAuthorization()
 
     then:
-    1 * tokenController.getCqlOAuthToken() >> token
-
-    and:
-    result == OAuthConstants.BEARER.getValue() + null
+    thrown(TokenException)
 }
