@@ -1,1 +1,87 @@
+test {
+    dependsOn 'cleanTest'
 
+    systemProperty 'spring.profiles.active', springProfile
+
+    test.enabled = true
+
+    /*
+     * ==============================================================
+     * PARALLEL UNIT TEST EXECUTION
+     * ==============================================================
+     *
+     * Runs test classes/specifications across multiple Gradle
+     * test-worker JVMs.
+     *
+     * Example:
+     *   8 CPU cores  -> 4 parallel workers
+     *   12 CPU cores -> 6 parallel workers
+     *   16 CPU cores -> 8 parallel workers
+     *
+     * Using ~50% of available processors is a good starting point
+     * for CI/Jenkins because it avoids starving Gradle, compilation,
+     * Sonar, JaCoCo and other processes.
+     */
+    int availableProcessors = Runtime.runtime.availableProcessors()
+
+    maxParallelForks = Math.max(
+            1,
+            (availableProcessors / 2) as int
+    )
+
+    /*
+     * Keep each worker JVM reasonably sized.
+     *
+     * Change these only if your project needs more memory.
+     */
+    minHeapSize = "256m"
+    maxHeapSize = "1024m"
+
+    /*
+     * Reuse worker JVMs.
+     *
+     * forkEvery = 0 means Gradle does NOT create a brand-new JVM
+     * for every test class. This is significantly faster when there
+     * are 1700+ tests.
+     */
+    forkEvery = 0
+
+    /*
+     * Fail build normally when a unit test fails.
+     */
+    ignoreFailures = false
+
+    /*
+     * Useful test output.
+     */
+    testLogging {
+        events "PASSED", "STARTED", "FAILED", "SKIPPED"
+
+        exceptionFormat = "FULL"
+
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+    }
+
+    /*
+     * Optional but useful when debugging parallel execution.
+     *
+     * Shows which Gradle Test Worker executed the test.
+     */
+    beforeTest { descriptor ->
+        logger.info(
+                "Running test: ${descriptor.className}.${descriptor.name}"
+        )
+    }
+
+    /*
+     * Print the parallel configuration once.
+     */
+    doFirst {
+        logger.lifecycle(
+                "Running unit tests with ${maxParallelForks} parallel test workers " +
+                "(${availableProcessors} processors available)"
+        )
+    }
+}
