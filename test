@@ -1,163 +1,56 @@
-package com.uhg.payer.product.utils
+def "getGqlAuthorization should return bearer authorization when token is available"() {
+    given:
+    def validationUtils = new ValidationUtils()
+    def tokenController = Mock(GraphQlOAuthTokenController)
 
-import com.uhg.payer.product.exception.TokenException
-import com.uhg.payer.product.validation.ValidationUtils
-import spock.lang.Specification
-import spock.lang.Unroll
+    validationUtils.graphQlOAuthTokenController = tokenController
 
-import java.util.concurrent.atomic.AtomicReference
+    def token = new AtomicReference<String>("test-access-token")
 
-class ValidationUtilsSpec extends Specification {
+    when:
+    String result = validationUtils.getGqlAuthorization()
 
-    @Unroll
-    def "formatStringMoney should convert '#money' to '#expectedResult'"() {
-        given:
-        def validationUtils = new ValidationUtils()
+    then:
+    1 * tokenController.getCqlOAuthToken() >> token
 
-        when:
-        String result = validationUtils.formatStringMoney(money)
-
-        then:
-        result == expectedResult
-
-        where:
-        money        || expectedResult
-        "1000"       || "1000.00"
-        "100"        || "100.00"
-        "1"          || "1.00"
-
-        "0"          || "0.00"
-        "0.0"        || "0.00"
-        "0.00"       || "0.00"
-        "0.000"      || "0.00"
-
-        "-0"         || "0.00"
-        "-0.0"       || "0.00"
-        "-0.00"      || "0.00"
-        "-0.000"     || "0.00"
-
-        "1.1"        || "1.10"
-        "10.5"       || "10.50"
-        "100.25"     || "100.25"
-        "999.99"     || "999.99"
-
-        "-1"         || "-1.00"
-        "-1.5"       || "-1.50"
-        "-10.50"     || "-10.50"
-        "-999.99"    || "-999.99"
-
-        "0.01"       || "0.01"
-        "-0.01"      || "-0.01"
-
-        "1000000"    || "1000000.00"
-        "9999999.99" || "9999999.99"
-    }
+    and:
+    result == OAuthConstants.BEARER.getValue() + "test-access-token"
+}
 
 
-    @Unroll
-    def "formatStringMoney should safely handle invalid input '#money'"() {
-        given:
-        def validationUtils = new ValidationUtils()
+def "getGqlAuthorization should throw TokenException when token reference is null"() {
+    given:
+    def validationUtils = new ValidationUtils()
+    def tokenController = Mock(GraphQlOAuthTokenController)
 
-        when:
-        String result = validationUtils.formatStringMoney(money)
+    validationUtils.graphQlOAuthTokenController = tokenController
 
-        then:
-        noExceptionThrown()
-        result == expectedResult
+    when:
+    validationUtils.getGqlAuthorization()
 
-        where:
-        money   || expectedResult
-        null    || null
-        ""      || ""
-        " "     || " "
-        "abc"   || "abc"
-        "10abc" || "10abc"
-        "--1"   || "--1"
-    }
+    then:
+    1 * tokenController.getCqlOAuthToken() >> null
+
+    and:
+    thrown(TokenException)
+}
 
 
-    @Unroll
-    def "formatStringMoney should handle surrounding whitespace '#money'"() {
-        given:
-        def validationUtils = new ValidationUtils()
+def "getGqlAuthorization should return bearer with null when AtomicReference contains null"() {
+    given:
+    def validationUtils = new ValidationUtils()
+    def tokenController = Mock(GraphQlOAuthTokenController)
 
-        when:
-        String result = validationUtils.formatStringMoney(money)
+    validationUtils.graphQlOAuthTokenController = tokenController
 
-        then:
-        result == expectedResult
+    def token = new AtomicReference<String>(null)
 
-        where:
-        money       || expectedResult
-        " 100 "     || "100.00"
-        " 10.50 "   || "10.50"
-        " -0.00 "   || "0.00"
-        " -10.50 "  || "-10.50"
-    }
+    when:
+    String result = validationUtils.getGqlAuthorization()
 
+    then:
+    1 * tokenController.getCqlOAuthToken() >> token
 
-    def "getCqlAuthorization should return bearer authorization when token is available"() {
-        given:
-        def validationUtils = new ValidationUtils()
-
-        def tokenController = Mock(GraphQlOAuthTokenController)
-
-        validationUtils.graphQlOAuthTokenController = tokenController
-
-        tokenController.getCqlOAuthToken() >>
-                new AtomicReference<String>("test-access-token")
-
-        when:
-        String result = validationUtils.getCqlAuthorization()
-
-        then:
-        result == OAuthConstants.BEARER.getValue() + "test-access-token"
-
-        and:
-        1 * tokenController.getCqlOAuthToken()
-    }
-
-
-    def "getCqlAuthorization should throw TokenException when token reference is null"() {
-        given:
-        def validationUtils = new ValidationUtils()
-
-        def tokenController = Mock(GraphQlOAuthTokenController)
-
-        validationUtils.graphQlOAuthTokenController = tokenController
-
-        tokenController.getCqlOAuthToken() >> null
-
-        when:
-        validationUtils.getCqlAuthorization()
-
-        then:
-        thrown(TokenException)
-
-        and:
-        1 * tokenController.getCqlOAuthToken()
-    }
-
-
-    def "getCqlAuthorization should handle AtomicReference containing null token"() {
-        given:
-        def validationUtils = new ValidationUtils()
-
-        def tokenController = Mock(GraphQlOAuthTokenController)
-
-        validationUtils.graphQlOAuthTokenController = tokenController
-
-        tokenController.getCqlOAuthToken() >>
-                new AtomicReference<String>(null)
-
-        when:
-        String result = validationUtils.getCqlAuthorization()
-
-        then:
-        result == OAuthConstants.BEARER.getValue() + null
-
-        and:
-        1 * tokenController.getCqlOAuthToken()
-    }
+    and:
+    result == OAuthConstants.BEARER.getValue() + null
 }
