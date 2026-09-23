@@ -1,58 +1,1285 @@
-def "getGqlAuthorization should return bearer authorization when token is available"() {
+/*
+ * Add the following test cases inside your existing
+ * CosmosServiceLevelMapperSpec extends Specification class.
+ *
+ * These tests cover the YTD-related methods shown in the screenshots:
+ *
+ *  - mapPlanLevelDedOopYtd(...)
+ *  - isNetworkCodeMatching(...)
+ *  - mapPlanLevelDeductibleYtd(...)
+ *  - mapServiceLevelDeductibleYtd(...)
+ *  - mapBenefitSetDeductibleYtd(...)
+ *  - buildPlanLevelYtdByNetwork(...)
+ *  - addPlanLevelYtd(...)
+ *  - mapServiceBenefitLevelYtd(...)
+ *  - getNetworkCode(ServiceBenefitLevelType)
+ *  - mapYtdAmounts(...) - covered through mapServiceBenefitLevelYtd
+ *  - hasDeductible(...)
+ *  - getNetworkCode(CodeDescPairType)
+ *
+ * This uses your existing invoke(...) helper:
+ *
+ * private Object invoke(String name, Class[] types, Object[] args) {
+ *     Method m = mapper.getClass().getDeclaredMethod(name, types)
+ *     m.setAccessible(true)
+ *     m.invoke(mapper, args)
+ * }
+ */
+
+
+// ============================================================================
+// mapPlanLevelDedOopYtd
+// ============================================================================
+
+def "mapPlanLevelDedOopYtd should return safely when collection code is null"() {
     given:
-    def tokenController = Mock(GraphQlOAuthTokenController)
-    def validationUtils = new ValidationUtils()
+    def collection = Mock(PlanCostShareCollection)
+    def planCostShare = Mock(PlanCostShare)
 
-    validationUtils.graphQlOAuthTokenController = tokenController
-
-    and:
-    def token = new AtomicReference<String>("test-access-token")
-
-    // IMPORTANT: stub before executing the method
-    tokenController.getCqlOAuthToken() >> token
+    collection.getPlanCostShareCollectionCode() >> null
 
     when:
-    String result = validationUtils.getGqlAuthorization()
+    invoke(
+            "mapPlanLevelDedOopYtd",
+            [PlanCostShareCollection, PlanCostShare, List] as Class[],
+            [collection, planCostShare, []] as Object[]
+    )
 
     then:
-    result == OAuthConstants.BEARER.getValue() + "test-access-token"
+    noExceptionThrown()
+    0 * planCostShare._
 }
 
 
-def "getGqlAuthorization should throw TokenException when token reference is null"() {
+def "mapPlanLevelDedOopYtd should safely handle D collection with empty levels"() {
     given:
-    def tokenController = Mock(GraphQlOAuthTokenController)
-    def validationUtils = new ValidationUtils()
+    def collection = Mock(PlanCostShareCollection)
+    def planCostShare = Mock(PlanCostShare)
 
-    validationUtils.graphQlOAuthTokenController = tokenController
-
-    and:
-    // IMPORTANT: explicitly return null
-    tokenController.getCqlOAuthToken() >> null
+    collection.getPlanCostShareCollectionCode() >> "D"
 
     when:
-    validationUtils.getGqlAuthorization()
+    invoke(
+            "mapPlanLevelDedOopYtd",
+            [PlanCostShareCollection, PlanCostShare, List] as Class[],
+            [collection, planCostShare, []] as Object[]
+    )
 
     then:
-    thrown(TokenException)
+    noExceptionThrown()
 }
 
 
-def "getGqlAuthorization should throw TokenException when AtomicReference contains null token"() {
+def "mapPlanLevelDedOopYtd should safely handle O collection with empty levels"() {
     given:
-    def tokenController = Mock(GraphQlOAuthTokenController)
-    def validationUtils = new ValidationUtils()
+    def collection = Mock(PlanCostShareCollection)
+    def planCostShare = Mock(PlanCostShare)
 
-    validationUtils.graphQlOAuthTokenController = tokenController
-
-    and:
-    def token = new AtomicReference<String>(null)
-
-    tokenController.getCqlOAuthToken() >> token
+    collection.getPlanCostShareCollectionCode() >> "O"
 
     when:
-    validationUtils.getGqlAuthorization()
+    invoke(
+            "mapPlanLevelDedOopYtd",
+            [PlanCostShareCollection, PlanCostShare, List] as Class[],
+            [collection, planCostShare, []] as Object[]
+    )
 
     then:
-    thrown(TokenException)
+    noExceptionThrown()
+}
+
+
+def "mapPlanLevelDedOopYtd should ignore unsupported collection code"() {
+    given:
+    def collection = Mock(PlanCostShareCollection)
+    def planCostShare = Mock(PlanCostShare)
+
+    collection.getPlanCostShareCollectionCode() >> "UNKNOWN"
+
+    when:
+    invoke(
+            "mapPlanLevelDedOopYtd",
+            [PlanCostShareCollection, PlanCostShare, List] as Class[],
+            [collection, planCostShare, []] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapPlanLevelDedOopYtd should ignore null level entries for deductible collection"() {
+    given:
+    def collection = Mock(PlanCostShareCollection)
+    def planCostShare = Mock(PlanCostShare)
+
+    collection.getPlanCostShareCollectionCode() >> "D"
+
+    when:
+    invoke(
+            "mapPlanLevelDedOopYtd",
+            [PlanCostShareCollection, PlanCostShare, List] as Class[],
+            [collection, planCostShare, [null]] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapPlanLevelDedOopYtd should skip level having null deductible list"() {
+    given:
+    def collection = Mock(PlanCostShareCollection)
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+
+    collection.getPlanCostShareCollectionCode() >> "D"
+    level.getPlanLevelDeductibles() >> null
+
+    when:
+    invoke(
+            "mapPlanLevelDedOopYtd",
+            [PlanCostShareCollection, PlanCostShare, List] as Class[],
+            [collection, planCostShare, [level]] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapPlanLevelDedOopYtd should skip level having empty deductible list"() {
+    given:
+    def collection = Mock(PlanCostShareCollection)
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+
+    collection.getPlanCostShareCollectionCode() >> "D"
+    level.getPlanLevelDeductibles() >> []
+
+    when:
+    invoke(
+            "mapPlanLevelDedOopYtd",
+            [PlanCostShareCollection, PlanCostShare, List] as Class[],
+            [collection, planCostShare, [level]] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+}
+
+
+// ============================================================================
+// isNetworkCodeMatching
+// ============================================================================
+
+def "isNetworkCodeMatching should match COMB when PlanCostShare network type is C"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+
+    planCostShare.getCostShareNetworkTypeCode() >> "C"
+    level.getNetwork() >> network
+    network.getCodeValue() >> "COMB"
+
+    expect:
+    invoke(
+            "isNetworkCodeMatching",
+            [PlanCostShare, PlanBenefitLevelType] as Class[],
+            [planCostShare, level] as Object[]
+    ) == true
+}
+
+
+def "isNetworkCodeMatching COMB comparison should be case insensitive"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+
+    planCostShare.getCostShareNetworkTypeCode() >> "c"
+    level.getNetwork() >> network
+    network.getCodeValue() >> "comb"
+
+    expect:
+    invoke(
+            "isNetworkCodeMatching",
+            [PlanCostShare, PlanBenefitLevelType] as Class[],
+            [planCostShare, level] as Object[]
+    ) == true
+}
+
+
+def "isNetworkCodeMatching should match INN and OON using regular network code"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+
+    planCostShare.getCostShareNetworkTypeCode() >> requestedCode
+    level.getNetwork() >> network
+    network.getCodeValue() >> levelCode
+
+    expect:
+    invoke(
+            "isNetworkCodeMatching",
+            [PlanCostShare, PlanBenefitLevelType] as Class[],
+            [planCostShare, level] as Object[]
+    ) == expected
+
+    where:
+    requestedCode | levelCode || expected
+    "INN"         | "INN"     || true
+    "OON"         | "OON"     || true
+    "INN"         | "OON"     || false
+    "OON"         | "INN"     || false
+    "INN"         | "inn"     || false
+}
+
+
+def "isNetworkCodeMatching should return false when level network is null"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+
+    planCostShare.getCostShareNetworkTypeCode() >> "INN"
+    level.getNetwork() >> null
+
+    expect:
+    invoke(
+            "isNetworkCodeMatching",
+            [PlanCostShare, PlanBenefitLevelType] as Class[],
+            [planCostShare, level] as Object[]
+    ) == false
+}
+
+
+def "isNetworkCodeMatching should return false for C when network code value is null"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+
+    planCostShare.getCostShareNetworkTypeCode() >> "C"
+    level.getNetwork() >> network
+    network.getCodeValue() >> null
+
+    expect:
+    invoke(
+            "isNetworkCodeMatching",
+            [PlanCostShare, PlanBenefitLevelType] as Class[],
+            [planCostShare, level] as Object[]
+    ) == false
+}
+
+
+def "isNetworkCodeMatching should return false when PlanCostShare network code is null"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+
+    planCostShare.getCostShareNetworkTypeCode() >> null
+    level.getNetwork() >> network
+    network.getCodeValue() >> "INN"
+
+    expect:
+    invoke(
+            "isNetworkCodeMatching",
+            [PlanCostShare, PlanBenefitLevelType] as Class[],
+            [planCostShare, level] as Object[]
+    ) == false
+}
+
+
+// ============================================================================
+// mapPlanLevelDeductibleYtd
+// ============================================================================
+
+def "mapPlanLevelDeductibleYtd should do nothing when cost share buckets are null"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def deductible = Mock(PlanLevelDeductibleType)
+
+    planCostShare.getCostShareBucket() >> null
+
+    when:
+    invoke(
+            "mapPlanLevelDeductibleYtd",
+            [List, PlanCostShare] as Class[],
+            [[deductible], planCostShare] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+    0 * deductible.setYTDAccumulatedIndividualDeductibleAmount(_)
+    0 * deductible.setYTDAccumulatedFamilyDeductibleAmount(_)
+}
+
+
+def "mapPlanLevelDeductibleYtd should map individual and family bucket values"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def bucket = Mock(CostShareBucket)
+    def deductible = Mock(PlanLevelDeductibleType)
+
+    planCostShare.getCostShareBucket() >> [bucket]
+
+    bucket.getBucketIndividualCostShareValue() >> "100.00"
+    bucket.getBucketFamilyCostShareValue() >> "200.00"
+
+    when:
+    invoke(
+            "mapPlanLevelDeductibleYtd",
+            [List, PlanCostShare] as Class[],
+            [[deductible], planCostShare] as Object[]
+    )
+
+    then:
+    1 * deductible.setYTDAccumulatedIndividualDeductibleAmount("100.00")
+    1 * deductible.setYTDAccumulatedFamilyDeductibleAmount("200.00")
+}
+
+
+def "mapPlanLevelDeductibleYtd should normalize negative zero values"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def bucket = Mock(CostShareBucket)
+    def deductible = Mock(PlanLevelDeductibleType)
+
+    planCostShare.getCostShareBucket() >> [bucket]
+
+    bucket.getBucketIndividualCostShareValue() >> "-0.00"
+    bucket.getBucketFamilyCostShareValue() >> "-0.00"
+
+    when:
+    invoke(
+            "mapPlanLevelDeductibleYtd",
+            [List, PlanCostShare] as Class[],
+            [[deductible], planCostShare] as Object[]
+    )
+
+    then:
+    1 * deductible.setYTDAccumulatedIndividualDeductibleAmount("0.00")
+    1 * deductible.setYTDAccumulatedFamilyDeductibleAmount("0.00")
+}
+
+
+def "mapPlanLevelDeductibleYtd should use individual amount as family fallback when family is blank"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def bucket = Mock(CostShareBucket)
+    def deductible = Mock(PlanLevelDeductibleType)
+
+    planCostShare.getCostShareBucket() >> [bucket]
+
+    bucket.getBucketIndividualCostShareValue() >> "125.00"
+    bucket.getBucketFamilyCostShareValue() >> " "
+
+    when:
+    invoke(
+            "mapPlanLevelDeductibleYtd",
+            [List, PlanCostShare] as Class[],
+            [[deductible], planCostShare] as Object[]
+    )
+
+    then:
+    1 * deductible.setYTDAccumulatedIndividualDeductibleAmount("125.00")
+    1 * deductible.setYTDAccumulatedFamilyDeductibleAmount("125.00")
+}
+
+
+def "mapPlanLevelDeductibleYtd should use individual amount as family fallback when family is null"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def bucket = Mock(CostShareBucket)
+    def deductible = Mock(PlanLevelDeductibleType)
+
+    planCostShare.getCostShareBucket() >> [bucket]
+
+    bucket.getBucketIndividualCostShareValue() >> "150.00"
+    bucket.getBucketFamilyCostShareValue() >> null
+
+    when:
+    invoke(
+            "mapPlanLevelDeductibleYtd",
+            [List, PlanCostShare] as Class[],
+            [[deductible], planCostShare] as Object[]
+    )
+
+    then:
+    1 * deductible.setYTDAccumulatedIndividualDeductibleAmount("150.00")
+    1 * deductible.setYTDAccumulatedFamilyDeductibleAmount("150.00")
+}
+
+
+def "mapPlanLevelDeductibleYtd should not set individual or family when both values are blank"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def bucket = Mock(CostShareBucket)
+    def deductible = Mock(PlanLevelDeductibleType)
+
+    planCostShare.getCostShareBucket() >> [bucket]
+
+    bucket.getBucketIndividualCostShareValue() >> " "
+    bucket.getBucketFamilyCostShareValue() >> ""
+
+    when:
+    invoke(
+            "mapPlanLevelDeductibleYtd",
+            [List, PlanCostShare] as Class[],
+            [[deductible], planCostShare] as Object[]
+    )
+
+    then:
+    0 * deductible.setYTDAccumulatedIndividualDeductibleAmount(_)
+    0 * deductible.setYTDAccumulatedFamilyDeductibleAmount(_)
+}
+
+
+def "mapPlanLevelDeductibleYtd should ignore null individual when family exists"() {
+    given:
+    def planCostShare = Mock(PlanCostShare)
+    def bucket = Mock(CostShareBucket)
+    def deductible = Mock(PlanLevelDeductibleType)
+
+    planCostShare.getCostShareBucket() >> [bucket]
+
+    bucket.getBucketIndividualCostShareValue() >> null
+    bucket.getBucketFamilyCostShareValue() >> "500.00"
+
+    when:
+    invoke(
+            "mapPlanLevelDeductibleYtd",
+            [List, PlanCostShare] as Class[],
+            [[deductible], planCostShare] as Object[]
+    )
+
+    then:
+    0 * deductible.setYTDAccumulatedIndividualDeductibleAmount(_)
+    1 * deductible.setYTDAccumulatedFamilyDeductibleAmount("500.00")
+}
+
+
+// ============================================================================
+// mapServiceLevelDeductibleYtd
+// ============================================================================
+
+def "mapServiceLevelDeductibleYtd should return safely for null input"() {
+    when:
+    mapper.mapServiceLevelDeductibleYtd(null)
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapServiceLevelDeductibleYtd should return safely for empty input"() {
+    when:
+    mapper.mapServiceLevelDeductibleYtd([])
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapServiceLevelDeductibleYtd should ignore null BenefitSet entries"() {
+    when:
+    mapper.mapServiceLevelDeductibleYtd([null])
+
+    then:
+    noExceptionThrown()
+}
+
+
+// ============================================================================
+// buildPlanLevelYtdByNetwork
+// ============================================================================
+
+def "buildPlanLevelYtdByNetwork should return empty map when plan level benefit set is null"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+
+    benefitSet.getPlanLevelBenefitSet() >> null
+
+    when:
+    Map result = (Map) invoke(
+            "buildPlanLevelYtdByNetwork",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    then:
+    result != null
+    result.isEmpty()
+}
+
+
+def "buildPlanLevelYtdByNetwork should return empty map when plan benefit levels are null"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planLevelSet = Mock(PlanLevelBenefitSetType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planLevelSet
+    planLevelSet.getPlanBenefitLevels() >> null
+
+    when:
+    Map result = (Map) invoke(
+            "buildPlanLevelYtdByNetwork",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    then:
+    result != null
+    result.isEmpty()
+}
+
+
+def "buildPlanLevelYtdByNetwork should ignore null plan benefit levels"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planLevelSet = Mock(PlanLevelBenefitSetType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planLevelSet
+    planLevelSet.getPlanBenefitLevels() >> [null]
+
+    when:
+    Map result = (Map) invoke(
+            "buildPlanLevelYtdByNetwork",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    then:
+    result.isEmpty()
+}
+
+
+def "buildPlanLevelYtdByNetwork should create YTD entries for INN OON and COMB"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planLevelSet = Mock(PlanLevelBenefitSetType)
+
+    def innLevel = Mock(PlanBenefitLevelType)
+    def oonLevel = Mock(PlanBenefitLevelType)
+    def combLevel = Mock(PlanBenefitLevelType)
+
+    def innNetwork = Mock(CodeDescPairType)
+    def oonNetwork = Mock(CodeDescPairType)
+    def combNetwork = Mock(CodeDescPairType)
+
+    def innDeductible = Mock(PlanLevelDeductibleType)
+    def oonDeductible = Mock(PlanLevelDeductibleType)
+    def combDeductible = Mock(PlanLevelDeductibleType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planLevelSet
+    planLevelSet.getPlanBenefitLevels() >> [innLevel, oonLevel, combLevel]
+
+    innLevel.getNetwork() >> innNetwork
+    innNetwork.getCodeValue() >> "INN"
+    innLevel.getPlanLevelDeductibles() >> [innDeductible]
+
+    oonLevel.getNetwork() >> oonNetwork
+    oonNetwork.getCodeValue() >> "OON"
+    oonLevel.getPlanLevelDeductibles() >> [oonDeductible]
+
+    combLevel.getNetwork() >> combNetwork
+    combNetwork.getCodeValue() >> "COMB"
+    combLevel.getPlanLevelDeductibles() >> [combDeductible]
+
+    innDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "1000.00"
+    innDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "500.00"
+
+    oonDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "2000.00"
+    oonDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "1000.00"
+
+    combDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "3000.00"
+    combDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "1500.00"
+
+    when:
+    Map result = (Map) invoke(
+            "buildPlanLevelYtdByNetwork",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    then:
+    result.size() == 3
+    result.containsKey("INN")
+    result.containsKey("OON")
+    result.containsKey("COMB")
+}
+
+
+// ============================================================================
+// addPlanLevelYtd
+// ============================================================================
+
+def "addPlanLevelYtd should return when network is null"() {
+    given:
+    def level = Mock(PlanBenefitLevelType)
+    Map ytdByNetwork = [:]
+
+    level.getNetwork() >> null
+
+    when:
+    invoke(
+            "addPlanLevelYtd",
+            [PlanBenefitLevelType, Map] as Class[],
+            [level, ytdByNetwork] as Object[]
+    )
+
+    then:
+    ytdByNetwork.isEmpty()
+}
+
+
+def "addPlanLevelYtd should return when network code value is null"() {
+    given:
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    Map ytdByNetwork = [:]
+
+    level.getNetwork() >> network
+    network.getCodeValue() >> null
+
+    when:
+    invoke(
+            "addPlanLevelYtd",
+            [PlanBenefitLevelType, Map] as Class[],
+            [level, ytdByNetwork] as Object[]
+    )
+
+    then:
+    ytdByNetwork.isEmpty()
+}
+
+
+def "addPlanLevelYtd should return when deductible list is null"() {
+    given:
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    Map ytdByNetwork = [:]
+
+    level.getNetwork() >> network
+    network.getCodeValue() >> "INN"
+    level.getPlanLevelDeductibles() >> null
+
+    when:
+    invoke(
+            "addPlanLevelYtd",
+            [PlanBenefitLevelType, Map] as Class[],
+            [level, ytdByNetwork] as Object[]
+    )
+
+    then:
+    ytdByNetwork.isEmpty()
+}
+
+
+def "addPlanLevelYtd should not add entry for empty deductible list"() {
+    given:
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    Map ytdByNetwork = [:]
+
+    level.getNetwork() >> network
+    network.getCodeValue() >> "INN"
+    level.getPlanLevelDeductibles() >> []
+
+    when:
+    invoke(
+            "addPlanLevelYtd",
+            [PlanBenefitLevelType, Map] as Class[],
+            [level, ytdByNetwork] as Object[]
+    )
+
+    then:
+    ytdByNetwork.isEmpty()
+}
+
+
+def "addPlanLevelYtd should ignore null deductibles and use first non-null deductible"() {
+    given:
+    def level = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    def deductible = Mock(PlanLevelDeductibleType)
+    Map ytdByNetwork = [:]
+
+    level.getNetwork() >> network
+    network.getCodeValue() >> "INN"
+    level.getPlanLevelDeductibles() >> [null, deductible]
+
+    deductible.getYTDAccumulatedFamilyDeductibleAmount() >> "1000.00"
+    deductible.getYTDAccumulatedIndividualDeductibleAmount() >> "500.00"
+
+    when:
+    invoke(
+            "addPlanLevelYtd",
+            [PlanBenefitLevelType, Map] as Class[],
+            [level, ytdByNetwork] as Object[]
+    )
+
+    then:
+    ytdByNetwork.size() == 1
+    ytdByNetwork.containsKey("INN")
+}
+
+
+// ============================================================================
+// getNetworkCode(ServiceBenefitLevelType)
+// ============================================================================
+
+def "getNetworkCode should map service benefit levels to correct network"() {
+    given:
+    def level = Mock(ServiceBenefitLevelType)
+    level.getBenefitLevel() >> benefitLevel
+
+    expect:
+    invoke(
+            "getNetworkCode",
+            [ServiceBenefitLevelType] as Class[],
+            [level] as Object[]
+    ) == expectedNetwork
+
+    where:
+    benefitLevel || expectedNetwork
+    "5"          || "INN"
+    "05"         || "INN"
+    "1"          || "OON"
+    "01"         || "OON"
+    "10"         || "COMB"
+    "99"         || null
+    ""           || null
+    null         || null
+}
+
+
+// ============================================================================
+// hasDeductible
+// ============================================================================
+
+def "hasDeductible should return false when deductible itself is null"() {
+    expect:
+    invoke(
+            "hasDeductible",
+            [ServiceLevelDeductibleType] as Class[],
+            [null] as Object[]
+    ) == false
+}
+
+
+def "hasDeductible should evaluate family and individual amounts"() {
+    given:
+    def deductible = Mock(ServiceLevelDeductibleType)
+
+    deductible.getFamilyDeductibleAmount() >> family
+    deductible.getIndividualDeductibleAmount() >> individual
+
+    expect:
+    invoke(
+            "hasDeductible",
+            [ServiceLevelDeductibleType] as Class[],
+            [deductible] as Object[]
+    ) == expected
+
+    where:
+    family   | individual || expected
+    null     | null       || false
+    "100.00" | null       || true
+    null     | "50.00"    || true
+    "100.00" | "50.00"    || true
+    ""       | null       || true
+    null     | ""         || true
+}
+
+
+// ============================================================================
+// getNetworkCode(CodeDescPairType)
+// ============================================================================
+
+def "getNetworkCode CodeDescPairType should return null when network is null"() {
+    expect:
+    invoke(
+            "getNetworkCode",
+            [CodeDescPairType] as Class[],
+            [null] as Object[]
+    ) == null
+}
+
+
+def "getNetworkCode CodeDescPairType should return null when codeValue is null"() {
+    given:
+    def network = Mock(CodeDescPairType)
+    network.getCodeValue() >> null
+
+    expect:
+    invoke(
+            "getNetworkCode",
+            [CodeDescPairType] as Class[],
+            [network] as Object[]
+    ) == null
+}
+
+
+def "getNetworkCode CodeDescPairType should trim uppercase and reject blank values"() {
+    given:
+    def network = Mock(CodeDescPairType)
+    network.getCodeValue() >> codeValue
+
+    expect:
+    invoke(
+            "getNetworkCode",
+            [CodeDescPairType] as Class[],
+            [network] as Object[]
+    ) == expected
+
+    where:
+    codeValue   || expected
+    "inn"       || "INN"
+    " Inn "     || "INN"
+    "oon"       || "OON"
+    " OON "     || "OON"
+    "comb"      || "COMB"
+    " CoMb "    || "COMB"
+    ""          || null
+    " "         || null
+    "   "       || null
+}
+
+
+// ============================================================================
+// mapServiceBenefitLevelYtd / mapYtdAmounts
+// ============================================================================
+
+def "mapServiceBenefitLevelYtd should return when service deductible is null"() {
+    given:
+    def level = Mock(ServiceBenefitLevelType)
+    level.getServiceLevelDeductible() >> null
+
+    when:
+    invoke(
+            "mapServiceBenefitLevelYtd",
+            [ServiceBenefitLevelType, Map] as Class[],
+            [level, [:]] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapServiceBenefitLevelYtd should return when service deductible has no amounts"() {
+    given:
+    def level = Mock(ServiceBenefitLevelType)
+    def deductible = Mock(ServiceLevelDeductibleType)
+
+    level.getServiceLevelDeductible() >> deductible
+    deductible.getFamilyDeductibleAmount() >> null
+    deductible.getIndividualDeductibleAmount() >> null
+
+    when:
+    invoke(
+            "mapServiceBenefitLevelYtd",
+            [ServiceBenefitLevelType, Map] as Class[],
+            [level, [:]] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+    0 * deductible.setYTDAccumulatedFamilyDeductibleAmount(_)
+    0 * deductible.setYTDAccumulatedIndividualDeductibleAmount(_)
+}
+
+
+def "mapServiceBenefitLevelYtd should return when benefit level has unsupported network"() {
+    given:
+    def level = Mock(ServiceBenefitLevelType)
+    def deductible = Mock(ServiceLevelDeductibleType)
+
+    level.getServiceLevelDeductible() >> deductible
+    deductible.getFamilyDeductibleAmount() >> "100.00"
+    deductible.getIndividualDeductibleAmount() >> null
+    level.getBenefitLevel() >> "99"
+
+    when:
+    invoke(
+            "mapServiceBenefitLevelYtd",
+            [ServiceBenefitLevelType, Map] as Class[],
+            [level, [:]] as Object[]
+    )
+
+    then:
+    0 * deductible.setYTDAccumulatedFamilyDeductibleAmount(_)
+    0 * deductible.setYTDAccumulatedIndividualDeductibleAmount(_)
+}
+
+
+def "mapServiceBenefitLevelYtd should return when no plan level YTD exists for network"() {
+    given:
+    def level = Mock(ServiceBenefitLevelType)
+    def deductible = Mock(ServiceLevelDeductibleType)
+
+    level.getServiceLevelDeductible() >> deductible
+    deductible.getFamilyDeductibleAmount() >> "100.00"
+    deductible.getIndividualDeductibleAmount() >> null
+
+    level.getBenefitLevel() >> "5"
+
+    when:
+    invoke(
+            "mapServiceBenefitLevelYtd",
+            [ServiceBenefitLevelType, Map] as Class[],
+            [level, [:]] as Object[]
+    )
+
+    then:
+    0 * deductible.setYTDAccumulatedFamilyDeductibleAmount(_)
+    0 * deductible.setYTDAccumulatedIndividualDeductibleAmount(_)
+}
+
+
+def "mapServiceBenefitLevelYtd should map both family and individual YTD amounts"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planLevelSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planLevelSet
+    planLevelSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> network
+    network.getCodeValue() >> "INN"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "1000.00"
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "500.00"
+
+    Map ytdByNetwork = (Map) invoke(
+            "buildPlanLevelYtdByNetwork",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    def serviceLevel = Mock(ServiceBenefitLevelType)
+    def serviceDeductible = Mock(ServiceLevelDeductibleType)
+
+    serviceLevel.getServiceLevelDeductible() >> serviceDeductible
+    serviceLevel.getBenefitLevel() >> "5"
+
+    serviceDeductible.getFamilyDeductibleAmount() >> "10.00"
+    serviceDeductible.getIndividualDeductibleAmount() >> "5.00"
+
+    when:
+    invoke(
+            "mapServiceBenefitLevelYtd",
+            [ServiceBenefitLevelType, Map] as Class[],
+            [serviceLevel, ytdByNetwork] as Object[]
+    )
+
+    then:
+    1 * serviceDeductible.setYTDAccumulatedFamilyDeductibleAmount("1000.00")
+    1 * serviceDeductible.setYTDAccumulatedIndividualDeductibleAmount("500.00")
+}
+
+
+def "mapServiceBenefitLevelYtd should map only family YTD when plan individual YTD is null"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planLevelSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planLevelSet
+    planLevelSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> network
+    network.getCodeValue() >> "OON"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "2000.00"
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> null
+
+    Map ytdByNetwork = (Map) invoke(
+            "buildPlanLevelYtdByNetwork",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    def serviceLevel = Mock(ServiceBenefitLevelType)
+    def serviceDeductible = Mock(ServiceLevelDeductibleType)
+
+    serviceLevel.getServiceLevelDeductible() >> serviceDeductible
+    serviceLevel.getBenefitLevel() >> "1"
+
+    serviceDeductible.getFamilyDeductibleAmount() >> "100.00"
+    serviceDeductible.getIndividualDeductibleAmount() >> "50.00"
+
+    when:
+    invoke(
+            "mapServiceBenefitLevelYtd",
+            [ServiceBenefitLevelType, Map] as Class[],
+            [serviceLevel, ytdByNetwork] as Object[]
+    )
+
+    then:
+    1 * serviceDeductible.setYTDAccumulatedFamilyDeductibleAmount("2000.00")
+    0 * serviceDeductible.setYTDAccumulatedIndividualDeductibleAmount(_)
+}
+
+
+def "mapServiceBenefitLevelYtd should map only individual YTD when plan family YTD is null"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planLevelSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planLevelSet
+    planLevelSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> network
+    network.getCodeValue() >> "COMB"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> null
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "750.00"
+
+    Map ytdByNetwork = (Map) invoke(
+            "buildPlanLevelYtdByNetwork",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    def serviceLevel = Mock(ServiceBenefitLevelType)
+    def serviceDeductible = Mock(ServiceLevelDeductibleType)
+
+    serviceLevel.getServiceLevelDeductible() >> serviceDeductible
+    serviceLevel.getBenefitLevel() >> "10"
+
+    serviceDeductible.getFamilyDeductibleAmount() >> "100.00"
+    serviceDeductible.getIndividualDeductibleAmount() >> "50.00"
+
+    when:
+    invoke(
+            "mapServiceBenefitLevelYtd",
+            [ServiceBenefitLevelType, Map] as Class[],
+            [serviceLevel, ytdByNetwork] as Object[]
+    )
+
+    then:
+    0 * serviceDeductible.setYTDAccumulatedFamilyDeductibleAmount(_)
+    1 * serviceDeductible.setYTDAccumulatedIndividualDeductibleAmount("750.00")
+}
+
+
+// ============================================================================
+// mapBenefitSetDeductibleYtd
+// ============================================================================
+
+def "mapBenefitSetDeductibleYtd should stop when no plan level YTD exists"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    benefitSet.getPlanLevelBenefitSet() >> null
+
+    when:
+    invoke(
+            "mapBenefitSetDeductibleYtd",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+    0 * benefitSet.getServiceLevelBenefitSet()
+}
+
+
+def "mapBenefitSetDeductibleYtd should safely handle null service level benefit set"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planSet
+    planSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> network
+    network.getCodeValue() >> "INN"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "1000.00"
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "500.00"
+
+    benefitSet.getServiceLevelBenefitSet() >> null
+
+    when:
+    invoke(
+            "mapBenefitSetDeductibleYtd",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapBenefitSetDeductibleYtd should safely handle null service benefits"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+    def planSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def network = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+    def serviceSet = Mock(ServiceLevelBenefitSetType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planSet
+    planSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> network
+    network.getCodeValue() >> "INN"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "1000.00"
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "500.00"
+
+    benefitSet.getServiceLevelBenefitSet() >> serviceSet
+    serviceSet.getServiceBenefits() >> null
+
+    when:
+    invoke(
+            "mapBenefitSetDeductibleYtd",
+            [BenefitSetType] as Class[],
+            [benefitSet] as Object[]
+    )
+
+    then:
+    noExceptionThrown()
+}
+
+
+// ============================================================================
+// FULL PUBLIC METHOD PIPELINE
+// mapServiceLevelDeductibleYtd
+// ============================================================================
+
+def "mapServiceLevelDeductibleYtd should map INN plan YTD values into service deductible"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+
+    def planSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def planNetwork = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+
+    def serviceSet = Mock(ServiceLevelBenefitSetType)
+    def serviceBenefit = Mock(ServiceBenefitType)
+    def serviceLevel = Mock(ServiceBenefitLevelType)
+    def serviceDeductible = Mock(ServiceLevelDeductibleType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planSet
+    planSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> planNetwork
+    planNetwork.getCodeValue() >> "INN"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "4000.00"
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "2000.00"
+
+    benefitSet.getServiceLevelBenefitSet() >> serviceSet
+    serviceSet.getServiceBenefits() >> [serviceBenefit]
+
+    serviceBenefit.getServiceBenefitLevels() >> [serviceLevel]
+
+    serviceLevel.getBenefitLevel() >> "5"
+    serviceLevel.getServiceLevelDeductible() >> serviceDeductible
+
+    serviceDeductible.getFamilyDeductibleAmount() >> "100.00"
+    serviceDeductible.getIndividualDeductibleAmount() >> "50.00"
+
+    when:
+    mapper.mapServiceLevelDeductibleYtd([benefitSet])
+
+    then:
+    1 * serviceDeductible.setYTDAccumulatedFamilyDeductibleAmount("4000.00")
+    1 * serviceDeductible.setYTDAccumulatedIndividualDeductibleAmount("2000.00")
+}
+
+
+def "mapServiceLevelDeductibleYtd should ignore null service benefits and null service benefit levels"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+
+    def planSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def planNetwork = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+
+    def serviceSet = Mock(ServiceLevelBenefitSetType)
+    def serviceBenefitWithNullLevels = Mock(ServiceBenefitType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planSet
+    planSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> planNetwork
+    planNetwork.getCodeValue() >> "INN"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "1000.00"
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "500.00"
+
+    benefitSet.getServiceLevelBenefitSet() >> serviceSet
+    serviceSet.getServiceBenefits() >> [null, serviceBenefitWithNullLevels]
+
+    serviceBenefitWithNullLevels.getServiceBenefitLevels() >> null
+
+    when:
+    mapper.mapServiceLevelDeductibleYtd([benefitSet])
+
+    then:
+    noExceptionThrown()
+}
+
+
+def "mapServiceLevelDeductibleYtd should ignore null entries inside service benefit levels"() {
+    given:
+    def benefitSet = Mock(BenefitSetType)
+
+    def planSet = Mock(PlanLevelBenefitSetType)
+    def planLevel = Mock(PlanBenefitLevelType)
+    def planNetwork = Mock(CodeDescPairType)
+    def planDeductible = Mock(PlanLevelDeductibleType)
+
+    def serviceSet = Mock(ServiceLevelBenefitSetType)
+    def serviceBenefit = Mock(ServiceBenefitType)
+
+    benefitSet.getPlanLevelBenefitSet() >> planSet
+    planSet.getPlanBenefitLevels() >> [planLevel]
+
+    planLevel.getNetwork() >> planNetwork
+    planNetwork.getCodeValue() >> "INN"
+    planLevel.getPlanLevelDeductibles() >> [planDeductible]
+
+    planDeductible.getYTDAccumulatedFamilyDeductibleAmount() >> "1000.00"
+    planDeductible.getYTDAccumulatedIndividualDeductibleAmount() >> "500.00"
+
+    benefitSet.getServiceLevelBenefitSet() >> serviceSet
+    serviceSet.getServiceBenefits() >> [serviceBenefit]
+    serviceBenefit.getServiceBenefitLevels() >> [null]
+
+    when:
+    mapper.mapServiceLevelDeductibleYtd([benefitSet])
+
+    then:
+    noExceptionThrown()
 }
