@@ -1,1 +1,165 @@
-test
+private static final String SERVICE_TYPE_DELIMITER = ":";
+private static final int BASIC_DATE_LENGTH = 8;
+
+private static void setTimeframeQualifier(
+        final String serviceTypeName,
+        final String costShareCode,
+        final Bucket bucket,
+        final Copay copay) {
+
+    if (isInvalidInput(serviceTypeName, costShareCode, bucket, copay)) {
+        return;
+    }
+
+    extractServiceTypeDetails(serviceTypeName)
+            .filter(details -> isMatchingBucket(
+                    details.serviceCode(),
+                    costShareCode,
+                    bucket))
+            .map(ServiceTypeDetails::timeframeQualifier)
+            .filter(qualifier -> !qualifier.isBlank())
+            .ifPresent(qualifier ->
+                    copay.setTimeframeQualifier(
+                            new CodeDescPairType(qualifier, "")
+                    ));
+}
+
+private static boolean isInvalidInput(
+        final String serviceTypeName,
+        final String costShareCode,
+        final Bucket bucket,
+        final Copay copay) {
+
+    return serviceTypeName == null
+            || serviceTypeName.isBlank()
+            || costShareCode == null
+            || costShareCode.isBlank()
+            || bucket == null
+            || copay == null;
+}
+
+private static Optional<ServiceTypeDetails> extractServiceTypeDetails(
+        final String serviceTypeName) {
+
+    final String[] parts =
+            serviceTypeName.split(SERVICE_TYPE_DELIMITER, -1);
+
+    /*
+     * Format:
+     * Outpatient Hospital:4704:ADM
+     * :4704:ADM
+     */
+    if (parts.length == 3 && !containsDateRange(parts)) {
+        return createServiceTypeDetails(parts[1], parts[2]);
+    }
+
+    /*
+     * Format:
+     * Outpatient Hospital:20200101:20251231:4704:ADM
+     * :20200101:20251231:4704:ADM
+     */
+    if (parts.length == 5 && containsDateRange(parts)) {
+        return createServiceTypeDetails(parts[3], parts[4]);
+    }
+
+    /*
+     * Examples intentionally ignored:
+     *
+     * Outpatient Hospital
+     * Outpatient Hospital:20200101:20251231
+     */
+    return Optional.empty();
+}
+
+private static Optional<ServiceTypeDetails> createServiceTypeDetails(
+        final String serviceCode,
+        final String timeframeQualifier) {
+
+    final String normalizedServiceCode =
+            serviceCode == null ? "" : serviceCode.trim();
+
+    final String normalizedQualifier =
+            timeframeQualifier == null ? "" : timeframeQualifier.trim();
+
+    if (normalizedServiceCode.isEmpty()
+            || normalizedQualifier.isEmpty()) {
+        return Optional.empty();
+    }
+
+    return Optional.of(
+            new ServiceTypeDetails(
+                    normalizedServiceCode,
+                    normalizedQualifier
+            ));
+}
+
+private static boolean containsDateRange(final String[] parts) {
+
+    return parts.length >= 3
+            && isBasicDate(parts[1])
+            && isBasicDate(parts[2]);
+}
+
+private static boolean isBasicDate(final String value) {
+
+    if (value == null) {
+        return false;
+    }
+
+    final String date = value.trim();
+
+    return date.length() == BASIC_DATE_LENGTH
+            && date.chars().allMatch(Character::isDigit);
+}
+
+private static boolean isMatchingBucket(
+        final String serviceCode,
+        final String costShareCode,
+        final Bucket bucket) {
+
+    final String serviceCodeSuffix =
+            extractServiceCodeSuffix(serviceCode);
+
+    if (serviceCodeSuffix.isEmpty()) {
+        return false;
+    }
+
+    final String expectedBucketCode =
+            costShareCode.trim() + serviceCodeSuffix + "1";
+
+    final String actualBucketCode =
+            Objects.toString(bucket.getBucketCode(), "").trim();
+
+    return actualBucketCode.equals(expectedBucketCode);
+}
+
+private static String extractServiceCodeSuffix(
+        final String serviceCode) {
+
+    if (serviceCode == null || serviceCode.isBlank()) {
+        return "";
+    }
+
+    final String normalizedCode = serviceCode.trim();
+
+    final String suffix = normalizedCode.length() >= 2
+            ? normalizedCode.substring(normalizedCode.length() - 2)
+            : normalizedCode;
+
+    /*
+     * Examples:
+     *
+     * 4704 -> "04" -> "4"
+     * 4712 -> "12"
+     * 4707 -> "07" -> "7"
+     * 5    -> "5"
+     */
+    return suffix.length() == 2 && suffix.charAt(0) == '0'
+            ? suffix.substring(1)
+            : suffix;
+}
+
+private record ServiceTypeDetails(
+        String serviceCode,
+        String timeframeQualifier) {
+}
