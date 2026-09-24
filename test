@@ -1,14 +1,439 @@
-In short:
+package com.example.service
 
-CAL/MSP/MEC/FLA/PPL/MTK -> always false
-Other non-special prefixes    -> true
-BNA/OHO                        -> true when CODE + DATE match
-NTL/OEB                        -> true when CODE + DATE do not match
+import spock.lang.Specification
+import spock.lang.Unroll
 
+import static com.example.service.CosmosGroupCodeMatcher.GroupCodeType.DENTAL
+import static com.example.service.CosmosGroupCodeMatcher.GroupCodeType.VISION
 
-For BRAVO:
+class CosmosGroupCodeMatcherSpec extends Specification {
 
-ATL/CAL/CHS/ETX/FLA/GSO/KLC/MPC/NEX/NTL/NYC/PPL/PVS/RAM/STM -> always false
-Other non-special prefixes                                     -> true
-SLC/BNA/OEB/PNX/BHM                                            -> true when CODE + DATE match
-OHO                                                            -> true when CODE + DATE do not match
+    private static final List<String> DENTAL_CODES = [
+            "BNA:90330:20220303",
+            "OHO:90440:20220404",
+            "NTL:90110:20220101",
+            "OEB:90220:20220202",
+
+            // duplicate value to exercise Set behavior
+            "BNA:90330:20220303",
+
+            // valid but non-special config entry -> ignored by lookup
+            "XYZ:99999:20221212",
+
+            // malformed config entries -> ignored
+            null,
+            "",
+            "   ",
+            "BAD",
+            "BAD:ONLY",
+            ":12345:20220101",
+            "ABC::20220101",
+            "ABC:12345:"
+    ]
+
+    private static final List<String> VISION_CODES = [
+            "SLC:11111:20220505",
+            "BNA:22222:20220606",
+            "OEB:33333:20220707",
+            "PNX:44444:20220808",
+            "BHM:55555:20220909",
+            "OHO:66666:20221010",
+
+            // valid but non-special config entry -> ignored by lookup
+            "XYZ:77777:20221111",
+
+            // malformed config entries -> ignored
+            null,
+            "",
+            "BAD",
+            "BAD:ONLY",
+            ":12345:20220101",
+            "ABC::20220101",
+            "ABC:12345:"
+    ]
+
+    def matcher = new CosmosGroupCodeMatcher(DENTAL_CODES, VISION_CODES)
+
+    def "constructor should support null and empty configuration lists"() {
+        expect:
+        new CosmosGroupCodeMatcher(null, null) != null
+        new CosmosGroupCodeMatcher([], []) != null
+        new CosmosGroupCodeMatcher(null, []) != null
+        new CosmosGroupCodeMatcher([], null) != null
+    }
+
+    def "matches should return false when groupCodeType is null"() {
+        expect:
+        !matcher.matches("BNA:90330:20220303", null)
+    }
+
+    @Unroll
+    def "matches should return false for invalid planGroupCode '#planGroupCode'"() {
+        expect:
+        !matcher.matches(planGroupCode, DENTAL)
+
+        where:
+        planGroupCode << [
+                null,
+                "",
+                "   ",
+                "BNA",
+                "BNA:90330",
+                ":90330:20220303",
+                "BNA::20220303",
+                "BNA:90330:"
+        ]
+    }
+
+    @Unroll
+    def "dental mismatched prefix '#prefix' should always return false"() {
+        expect:
+        !matcher.matches("${prefix}:12345:20250101", DENTAL)
+
+        where:
+        prefix << ["CAL", "MSP", "MEC", "FLA", "PPL", "MTK"]
+    }
+
+    @Unroll
+    def "vision mismatched prefix '#prefix' should always return false"() {
+        expect:
+        !matcher.matches("${prefix}:12345:20250101", VISION)
+
+        where:
+        prefix << [
+                "ATL", "CAL", "CHS", "ETX", "FLA",
+                "GSO", "KLC", "MPC", "NEX", "NTL",
+                "NYC", "PPL", "PVS", "RAM", "STM"
+        ]
+    }
+
+    def "dental non-special prefix should return true"() {
+        expect:
+        matcher.matches("XYZ:12345:20250101", DENTAL)
+    }
+
+    def "vision non-special prefix should return true"() {
+        expect:
+        matcher.matches("XYZ:12345:20250101", VISION)
+    }
+
+    @Unroll
+    def "dental match-required prefix '#prefix' should return true when code and date match"() {
+        expect:
+        matcher.matches(planGroupCode, DENTAL)
+
+        where:
+        prefix | planGroupCode
+        "BNA"  | "BNA:90330:20220303"
+        "OHO"  | "OHO:90440:20220404"
+    }
+
+    @Unroll
+    def "dental match-required prefix '#prefix' should return false when code or date do not match"() {
+        expect:
+        !matcher.matches(planGroupCode, DENTAL)
+
+        where:
+        prefix | planGroupCode
+        "BNA"  | "BNA:99999:20220303"
+        "BNA"  | "BNA:90330:20990101"
+        "OHO"  | "OHO:99999:20220404"
+        "OHO"  | "OHO:90440:20990101"
+    }
+
+    @Unroll
+    def "dental mismatch-required prefix '#prefix' should return false when code and date match"() {
+        expect:
+        !matcher.matches(planGroupCode, DENTAL)
+
+        where:
+        prefix | planGroupCode
+        "NTL"  | "NTL:90110:20220101"
+        "OEB"  | "OEB:90220:20220202"
+    }
+
+    @Unroll
+    def "dental mismatch-required prefix '#prefix' should return true when code or date do not match"() {
+        expect:
+        matcher.matches(planGroupCode, DENTAL)
+
+        where:
+        prefix | planGroupCode
+        "NTL"  | "NTL:99999:20220101"
+        "NTL"  | "NTL:90110:20990101"
+        "OEB"  | "OEB:99999:20220202"
+        "OEB"  | "OEB:90220:20990101"
+    }
+
+    @Unroll
+    def "vision match-required prefix '#prefix' should return true when code and date match"() {
+        expect:
+        matcher.matches(planGroupCode, VISION)
+
+        where:
+        prefix | planGroupCode
+        "SLC"  | "SLC:11111:20220505"
+        "BNA"  | "BNA:22222:20220606"
+        "OEB"  | "OEB:33333:20220707"
+        "PNX"  | "PNX:44444:20220808"
+        "BHM"  | "BHM:55555:20220909"
+    }
+
+    @Unroll
+    def "vision match-required prefix '#prefix' should return false when code or date do not match"() {
+        expect:
+        !matcher.matches(planGroupCode, VISION)
+
+        where:
+        prefix | planGroupCode
+        "SLC"  | "SLC:99999:20220505"
+        "BNA"  | "BNA:22222:20990101"
+        "OEB"  | "OEB:99999:20220707"
+        "PNX"  | "PNX:44444:20990101"
+        "BHM"  | "BHM:99999:20220909"
+    }
+
+    def "vision mismatch-required OHO should return false when code and date match"() {
+        expect:
+        !matcher.matches("OHO:66666:20221010", VISION)
+    }
+
+    @Unroll
+    def "vision mismatch-required OHO should return true when code or date do not match"() {
+        expect:
+        matcher.matches(planGroupCode, VISION)
+
+        where:
+        planGroupCode << [
+                "OHO:99999:20221010",
+                "OHO:66666:20990101"
+        ]
+    }
+
+    def "special prefix should return false when no configured code exists for that prefix"() {
+        given:
+        def emptyMatcher = new CosmosGroupCodeMatcher([], [])
+
+        expect:
+        !emptyMatcher.matches("BNA:90330:20220303", DENTAL)
+        !emptyMatcher.matches("NTL:90110:20220101", DENTAL)
+        !emptyMatcher.matches("SLC:11111:20220505", VISION)
+        !emptyMatcher.matches("OHO:66666:20221010", VISION)
+    }
+
+    def "default matches method should use DENTAL rules"() {
+        expect:
+        matcher.matches("BNA:90330:20220303")
+        !matcher.matches("BNA:99999:20220303")
+        !matcher.matches("CAL:12345:20250101")
+        matcher.matches("XYZ:12345:20250101")
+    }
+
+    def "plan group code should ignore attributes after first three parts"() {
+        expect:
+        matcher.matches("BNA:90330:20220303:M:008", DENTAL)
+        matcher.matches("SLC:11111:20220505:EXTRA:VALUE", VISION)
+        !matcher.matches("NTL:90110:20220101:M:008", DENTAL)
+    }
+
+    def "prefix should be case insensitive because parser normalizes to uppercase"() {
+        expect:
+        matcher.matches("bna:90330:20220303", DENTAL)
+        !matcher.matches("ntl:90110:20220101", DENTAL)
+        matcher.matches("slc:11111:20220505", VISION)
+        !matcher.matches("oho:66666:20221010", VISION)
+    }
+
+    def "parser should trim whitespace around prefix code and date"() {
+        expect:
+        matcher.matches("  bna : 90330 : 20220303 ", DENTAL)
+        matcher.matches(" slc : 11111 : 20220505 ", VISION)
+    }
+
+    def "duplicate configured group codes should not affect matching behavior"() {
+        expect:
+        matcher.matches("BNA:90330:20220303", DENTAL)
+    }
+
+    def "valid non-special configured entries should not be used for special lookup logic"() {
+        expect:
+        matcher.matches("XYZ:99999:20221212", DENTAL)
+        matcher.matches("XYZ:77777:20221111", VISION)
+    }
+
+    def "dental and vision should apply different rules for same prefix"() {
+        expect:
+        // OEB is mismatch-required in DENTAL
+        !matcher.matches("OEB:90220:20220202", DENTAL)
+        matcher.matches("OEB:99999:20220202", DENTAL)
+
+        // OEB is match-required in VISION
+        matcher.matches("OEB:33333:20220707", VISION)
+        !matcher.matches("OEB:99999:20220707", VISION)
+
+        // OHO is match-required in DENTAL
+        matcher.matches("OHO:90440:20220404", DENTAL)
+        !matcher.matches("OHO:99999:20220404", DENTAL)
+
+        // OHO is mismatch-required in VISION
+        !matcher.matches("OHO:66666:20221010", VISION)
+        matcher.matches("OHO:99999:20221010", VISION)
+    }
+
+    def "same prefix should use only group codes configured for selected type"() {
+        expect:
+        matcher.matches("BNA:90330:20220303", DENTAL)
+        !matcher.matches("BNA:90330:20220303", VISION)
+
+        matcher.matches("BNA:22222:20220606", VISION)
+        !matcher.matches("BNA:22222:20220606", DENTAL)
+    }
+
+    def "configuration entries with additional attributes should use first three attributes only"() {
+        given:
+        def customMatcher = new CosmosGroupCodeMatcher(
+                ["BNA:12345:20250101:M:008"],
+                ["SLC:54321:20250202:X:Y"]
+        )
+
+        expect:
+        customMatcher.matches("BNA:12345:20250101", DENTAL)
+        customMatcher.matches("SLC:54321:20250202", VISION)
+    }
+
+    def "lowercase configured prefixes should be normalized"() {
+        given:
+        def customMatcher = new CosmosGroupCodeMatcher(
+                ["bna:12345:20250101", "ntl:54321:20250202"],
+                ["slc:11111:20250303", "oho:22222:20250404"]
+        )
+
+        expect:
+        customMatcher.matches("BNA:12345:20250101", DENTAL)
+        !customMatcher.matches("NTL:54321:20250202", DENTAL)
+
+        customMatcher.matches("SLC:11111:20250303", VISION)
+        !customMatcher.matches("OHO:22222:20250404", VISION)
+    }
+
+    def "configuration entries should trim prefix code and date"() {
+        given:
+        def customMatcher = new CosmosGroupCodeMatcher(
+                [" BNA : 12345 : 20250101 "],
+                [" SLC : 54321 : 20250202 "]
+        )
+
+        expect:
+        customMatcher.matches("BNA:12345:20250101", DENTAL)
+        customMatcher.matches("SLC:54321:20250202", VISION)
+    }
+
+    def "malformed configuration entries should be skipped without failure"() {
+        given:
+        def customMatcher = new CosmosGroupCodeMatcher(
+                [
+                        null,
+                        "",
+                        " ",
+                        "INVALID",
+                        "BNA:",
+                        ":12345:20250101",
+                        "BNA::20250101",
+                        "BNA:12345:",
+                        "BNA:12345:20250101"
+                ],
+                [
+                        null,
+                        "INVALID",
+                        "SLC::20250202",
+                        "SLC:54321:"
+                ]
+        )
+
+        expect:
+        customMatcher.matches("BNA:12345:20250101", DENTAL)
+        !customMatcher.matches("SLC:54321:20250202", VISION)
+    }
+
+    def "empty dental configuration should not affect vision configuration"() {
+        given:
+        def customMatcher = new CosmosGroupCodeMatcher(
+                [],
+                ["SLC:11111:20220505"]
+        )
+
+        expect:
+        !customMatcher.matches("BNA:90330:20220303", DENTAL)
+        customMatcher.matches("SLC:11111:20220505", VISION)
+    }
+
+    def "empty vision configuration should not affect dental configuration"() {
+        given:
+        def customMatcher = new CosmosGroupCodeMatcher(
+                ["BNA:90330:20220303"],
+                []
+        )
+
+        expect:
+        customMatcher.matches("BNA:90330:20220303", DENTAL)
+        !customMatcher.matches("SLC:11111:20220505", VISION)
+    }
+
+    @Unroll
+    def "plan with empty required field should return false - '#planGroupCode'"() {
+        expect:
+        !matcher.matches(planGroupCode, DENTAL)
+
+        where:
+        planGroupCode << [
+                ":CODE:DATE",
+                "BNA::DATE",
+                "BNA:CODE:",
+                " :CODE:DATE",
+                "BNA: :DATE",
+                "BNA:CODE: "
+        ]
+    }
+
+    def "extra delimiter content should not change first three parsed attributes"() {
+        expect:
+        matcher.matches("BNA:90330:20220303:", DENTAL)
+        matcher.matches("BNA:90330:20220303:::anything", DENTAL)
+    }
+
+    def "non-special prefix remains true even when no cosmos configuration exists"() {
+        given:
+        def emptyMatcher = new CosmosGroupCodeMatcher(null, null)
+
+        expect:
+        emptyMatcher.matches("ABC:12345:20250101", DENTAL)
+        emptyMatcher.matches("ABC:12345:20250101", VISION)
+    }
+
+    def "mismatched prefix remains false even when configuration is empty"() {
+        given:
+        def emptyMatcher = new CosmosGroupCodeMatcher(null, null)
+
+        expect:
+        !emptyMatcher.matches("CAL:12345:20250101", DENTAL)
+        !emptyMatcher.matches("ATL:12345:20250101", VISION)
+    }
+
+    def "all dental special prefixes are exercised"() {
+        expect:
+        matcher.matches("BNA:90330:20220303", DENTAL)
+        matcher.matches("OHO:90440:20220404", DENTAL)
+        !matcher.matches("NTL:90110:20220101", DENTAL)
+        !matcher.matches("OEB:90220:20220202", DENTAL)
+    }
+
+    def "all vision special prefixes are exercised"() {
+        expect:
+        matcher.matches("SLC:11111:20220505", VISION)
+        matcher.matches("BNA:22222:20220606", VISION)
+        matcher.matches("OEB:33333:20220707", VISION)
+        matcher.matches("PNX:44444:20220808", VISION)
+        matcher.matches("BHM:55555:20220909", VISION)
+        !matcher.matches("OHO:66666:20221010", VISION)
+    }
+}
