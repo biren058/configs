@@ -1,49 +1,272 @@
-This code validates a planGroupCode against configured Cosmos group codes using the format:
+package com.example.service;
 
-PREFIX:CODE:DATE
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
-Functionality:
-1. Parse the incoming planGroupCode into prefix, code, and date.
-2. If the prefix belongs to a known mismatched/excluded group, return false.
-   Example: CAL, MSP, MEC, FLA, PPL, MTK -> false.
-3. If the prefix is not one of the special Cosmos comparison prefixes
-   (NTL, OEB, BNA, OHO), return true.
-4. For the special prefixes, compare the plan code/date against the configured
-   Cosmos code/date values having the same prefix.
-5. BNA/OHO -> return true only when CODE and DATE match.
-6. NTL/OEB -> return true only when CODE and DATE do NOT match.
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
-Examples:
-Cosmos config: BNA:90330:20220303
-Plan:          BNA:90330:20220303 -> true
-Plan:          BNA:99999:20220303 -> false
+@Component
+public class CosmosGroupCodeMatcher {
 
-Cosmos config: NTL:90110:20220101
-Plan:          NTL:90110:20220101 -> false
-Plan:          NTL:99999:20220101 -> true
+    private static final String DELIMITER = ":";
+    private static final int MINIMUM_REQUIRED_PARTS = 3;
+    private static final int SPLIT_LIMIT = 4;
 
-Plan:          CAL:12345:20220101 -> false
-Plan:          XYZ:12345:20220101 -> true
+    /*
+     * BNA / OHO:
+     * CODE + DATE must match the configured Cosmos value.
+     */
+    private static final Set<String> MATCH_REQUIRED_PREFIXES =
+            Set.of("BNA", "OHO");
 
+    /*
+     * NTL / OEB:
+     * CODE + DATE must NOT match the configured Cosmos value.
+     */
+    private static final Set<String> MISMATCH_REQUIRED_PREFIXES =
+            Set.of("NTL", "OEB");
 
-/**
- * Validates the supplied plan group code against the configured Cosmos group codes.
- *
- * <p>The expected group-code format is {@code PREFIX:CODE:DATE}.</p>
- *
- * <p>Business rules:</p>
- * <ul>
- *     <li>Returns {@code false} for prefixes configured as mismatched/excluded.</li>
- *     <li>Returns {@code true} for valid prefixes that do not require special
- *         Cosmos code/date comparison.</li>
- *     <li>For BNA and OHO, returns {@code true} only when the CODE and DATE
- *         match a configured Cosmos value with the same prefix.</li>
- *     <li>For NTL and OEB, returns {@code true} only when the CODE and DATE
- *         do not match any configured Cosmos value with the same prefix.</li>
- *     <li>Returns {@code false} when the input is null, blank, or invalid.</li>
- * </ul>
- *
- * @param planGroupCode plan group code in {@code PREFIX:CODE:DATE} format
- * @return {@code true} when the plan group code satisfies the applicable
- *         prefix-specific business rule; otherwise {@code false}
- */
+    /*
+     * Prefixes that require special Cosmos CODE + DATE comparison.
+     */
+    private static final Set<String> SPECIAL_PREFIXES =
+            Set.of("NTL", "OEB", "BNA", "OHO");
+
+    /*
+     * Known mismatched site prefixes always return false.
+     */
+    private static final Set<String> MISMATCHED_PREFIXES =
+            Set.of("CAL", "MSP", "MEC", "FLA", "PPL", "MTK");
+
+    private final Map<String, Set<String>> cosmosCodesByPrefix;
+
+    public CosmosGroupCodeMatcher(
+            @Value("${cosmos.group-codes:}") List<String> cosmosGroupCodes) {
+
+        this.cosmosCodesByPrefix = buildLookupMap(cosmosGroupCodes);
+    }
+
+    /**
+     * Validates the supplied plan group code using prefix-specific business rules.
+     *
+     * <p>Expected minimum format: {@code PREFIX:CODE:DATE}.
+     * Additional attributes after DATE are ignored.</p>
+     *
+     * <ul>
+     *     <li>Known mismatched prefixes return false.</li>
+     *     <li>Prefixes outside the special Cosmos group return true.</li>
+     *     <li>BNA/OHO return true only when CODE + DATE match Cosmos configuration.</li>
+     *     <li>NTL/OEB return true only when CODE + DATE do not match Cosmos configuration.</li>
+     * </ul>
+     *
+     * @param planGroupCode plan group code
+     * @return true when the applicable business rule is satisfied
+     */
+    public boolean matches(String planGroupCode) {
+
+        Optional<GroupCode> parsedPlanGroupCode =
+                parseGroupCode(planGroupCode);
+
+        if (parsedPlanGroupCode.isEmpty()) {
+            return false;
+        }
+
+        GroupCode planCode = parsedPlanGroupCode.get();
+        String prefix = planCode.prefix();
+
+        /*
+         * CAL / MSP / MEC / FLA / PPL / MTK
+         * always return false.
+         */
+        if (MISMATCHED_PREFIXES.contains(prefix)) {
+            return false;
+        }
+
+        /*
+         * Any other valid prefix that does not require
+         * special Cosmos comparison returns true.
+         */
+        if (!SPECIAL_PREFIXES.contains(prefix)) {
+            return true;
+        }
+
+        /*
+         * At this point the prefix is one of:
+         * NTL / OEB / BNA / OHO.
+         *
+         * Get configured Cosmos CODE + DATE combinations
+         * only for the matching prefix.
+         */
+        Set<String> configuredCodeAndDates =
+                cosmosCodesByPrefix.getOrDefault(
+                        prefix,
+                        Collections.emptySet()
+                );
+
+        /*
+         * Special prefix must exist in Cosmos configuration.
+         */
+        if (configuredCodeAndDates.isEmpty()) {
+            return false;
+        }
+
+        boolean codeAndDateMatch =
+                configuredCodeAndDates.contains(
+                        buildCodeAndDateKey(
+                                planCode.code(),
+                                planCode.date()
+                        )
+                );
+
+        /*
+         * BNA / OHO:
+         * true only when CODE + DATE match.
+         */
+        if (MATCH_REQUIRED_PREFIXES.contains(prefix)) {
+            return codeAndDateMatch;
+        }
+
+        /*
+         * NTL / OEB:
+         * true only when CODE + DATE do not match.
+         */
+        return !codeAndDateMatch;
+    }
+
+    /**
+     * Builds an immutable lookup of configured Cosmos CODE + DATE values
+     * grouped by the special Cosmos prefixes.
+     */
+    private static Map<String, Set<String>> buildLookupMap(
+            List<String> cosmosGroupCodes) {
+
+        if (cosmosGroupCodes == null || cosmosGroupCodes.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, Set<String>> lookup = new HashMap<>();
+
+        for (String cosmosGroupCode : cosmosGroupCodes) {
+
+            Optional<GroupCode> parsedGroupCode =
+                    parseGroupCode(cosmosGroupCode);
+
+            if (parsedGroupCode.isEmpty()) {
+                continue;
+            }
+
+            GroupCode groupCode = parsedGroupCode.get();
+
+            /*
+             * The config lookup is only needed for the four
+             * prefixes that require Cosmos comparison.
+             *
+             * parseGroupCode() intentionally does NOT perform
+             * this validation because the same parser is also
+             * used for incoming planGroupCode values.
+             */
+            if (!SPECIAL_PREFIXES.contains(groupCode.prefix())) {
+                continue;
+            }
+
+            lookup.computeIfAbsent(
+                            groupCode.prefix(),
+                            ignored -> new HashSet<>()
+                    )
+                    .add(
+                            buildCodeAndDateKey(
+                                    groupCode.code(),
+                                    groupCode.date()
+                            )
+                    );
+        }
+
+        Map<String, Set<String>> immutableLookup = new HashMap<>();
+
+        lookup.forEach(
+                (prefix, values) ->
+                        immutableLookup.put(
+                                prefix,
+                                Set.copyOf(values)
+                        )
+        );
+
+        return Map.copyOf(immutableLookup);
+    }
+
+    /**
+     * Parses the first three attributes of a group code.
+     *
+     * <p>This method only validates the structure of the value.
+     * It intentionally does not validate whether the prefix belongs
+     * to SPECIAL_PREFIXES because it is used for both Cosmos
+     * configuration values and incoming plan group codes.</p>
+     *
+     * <p>Examples:</p>
+     * <pre>
+     * BNA:90330:20220303       -> BNA, 90330, 20220303
+     * BNA:90330:20220303:M:008 -> BNA, 90330, 20220303
+     * </pre>
+     */
+    private static Optional<GroupCode> parseGroupCode(String groupCode) {
+
+        if (groupCode == null || groupCode.isBlank()) {
+            return Optional.empty();
+        }
+
+        /*
+         * Limit of 4 avoids unnecessarily splitting everything
+         * after the first three required attributes.
+         */
+        String[] parts =
+                groupCode.split(DELIMITER, SPLIT_LIMIT);
+
+        if (parts.length < MINIMUM_REQUIRED_PARTS) {
+            return Optional.empty();
+        }
+
+        String prefix =
+                parts[0].trim().toUpperCase(Locale.ROOT);
+
+        String code =
+                parts[1].trim();
+
+        String date =
+                parts[2].trim();
+
+        if (prefix.isEmpty()
+                || code.isEmpty()
+                || date.isEmpty()) {
+
+            return Optional.empty();
+        }
+
+        return Optional.of(
+                new GroupCode(
+                        prefix,
+                        code,
+                        date
+                )
+        );
+    }
+
+    private static String buildCodeAndDateKey(
+            String code,
+            String date) {
+
+        return code + DELIMITER + date;
+    }
+
+    private record GroupCode(
+            String prefix,
+            String code,
+            String date) {
+    }
+}
