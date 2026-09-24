@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -20,56 +21,93 @@ public class CosmosGroupCodeMatcher {
     private static final int SPLIT_LIMIT = 4;
 
     /*
-     * BNA / OHO:
-     * CODE + DATE must match the configured Cosmos value.
+     * ALPHA RULES
+     *
+     * MATCH_REQUIRED_PREFIXES    : BNA, OHO
+     * MISMATCH_REQUIRED_PREFIXES : NTL, OEB
+     * MISMATCHED_PREFIXES        : CAL, MSP, MEC, FLA, PPL, MTK
      */
-    private static final Set<String> MATCH_REQUIRED_PREFIXES =
-            Set.of("BNA", "OHO");
+    private static final PrefixRules ALPHA_RULES = new PrefixRules(
+            Set.of("BNA", "OHO"),
+            Set.of("NTL", "OEB"),
+            Set.of("CAL", "MSP", "MEC", "FLA", "PPL", "MTK")
+    );
 
     /*
-     * NTL / OEB:
-     * CODE + DATE must NOT match the configured Cosmos value.
+     * BRAVO RULES
+     *
+     * MATCH_REQUIRED_PREFIXES    : SLC, BNA, OEB, PNX, BHM
+     * MISMATCH_REQUIRED_PREFIXES : OHO
+     * MISMATCHED_PREFIXES        : ATL, CAL, CHS, ETX, FLA, GSO,
+     *                              KLC, MPC, NEX, NTL, NYC, PPL,
+     *                              PVS, RAM, STM
      */
-    private static final Set<String> MISMATCH_REQUIRED_PREFIXES =
-            Set.of("NTL", "OEB");
+    private static final PrefixRules BRAVO_RULES = new PrefixRules(
+            Set.of("SLC", "BNA", "OEB", "PNX", "BHM"),
+            Set.of("OHO"),
+            Set.of(
+                    "ATL", "CAL", "CHS", "ETX", "FLA",
+                    "GSO", "KLC", "MPC", "NEX", "NTL",
+                    "NYC", "PPL", "PVS", "RAM", "STM"
+            )
+    );
 
-    /*
-     * Prefixes that require special Cosmos CODE + DATE comparison.
-     */
-    private static final Set<String> SPECIAL_PREFIXES =
-            Set.of("NTL", "OEB", "BNA", "OHO");
-
-    /*
-     * Known mismatched site prefixes always return false.
-     */
-    private static final Set<String> MISMATCHED_PREFIXES =
-            Set.of("CAL", "MSP", "MEC", "FLA", "PPL", "MTK");
-
-    private final Map<String, Set<String>> cosmosCodesByPrefix;
+    private final Map<GroupCodeType, PrefixRules> rulesByType;
+    private final Map<GroupCodeType, Map<String, Set<String>>> cosmosCodesByType;
 
     public CosmosGroupCodeMatcher(
-            @Value("${cosmos.group-codes:}") List<String> cosmosGroupCodes) {
+            @Value("${cosmos.group-codes.alpha:}") List<String> alphaGroupCodes,
+            @Value("${cosmos.group-codes.bravo:}") List<String> bravoGroupCodes) {
 
-        this.cosmosCodesByPrefix = buildLookupMap(cosmosGroupCodes);
+        this.rulesByType = createRules();
+
+        Map<GroupCodeType, Map<String, Set<String>>> lookup =
+                new EnumMap<>(GroupCodeType.class);
+
+        lookup.put(
+                GroupCodeType.ALPHA,
+                buildLookupMap(
+                        alphaGroupCodes,
+                        ALPHA_RULES.specialPrefixes()
+                )
+        );
+
+        lookup.put(
+                GroupCodeType.BRAVO,
+                buildLookupMap(
+                        bravoGroupCodes,
+                        BRAVO_RULES.specialPrefixes()
+                )
+        );
+
+        this.cosmosCodesByType = Map.copyOf(lookup);
     }
 
     /**
-     * Validates the supplied plan group code using prefix-specific business rules.
+     * Validates a plan group code using the business rules associated
+     * with the supplied Cosmos group-code type.
      *
      * <p>Expected minimum format: {@code PREFIX:CODE:DATE}.
      * Additional attributes after DATE are ignored.</p>
      *
-     * <ul>
-     *     <li>Known mismatched prefixes return false.</li>
-     *     <li>Prefixes outside the special Cosmos group return true.</li>
-     *     <li>BNA/OHO return true only when CODE + DATE match Cosmos configuration.</li>
-     *     <li>NTL/OEB return true only when CODE + DATE do not match Cosmos configuration.</li>
-     * </ul>
+     * <p>Examples:</p>
+     * <pre>
+     * BNA:90330:20220303
+     * BNA:90330:20220303:M:008
+     * </pre>
      *
      * @param planGroupCode plan group code
-     * @return true when the applicable business rule is satisfied
+     * @param groupCodeType ALPHA or BRAVO
+     * @return true when the plan group code satisfies the applicable rule;
+     *         otherwise false
      */
-    public boolean matches(String planGroupCode) {
+    public boolean matches(
+            String planGroupCode,
+            GroupCodeType groupCodeType) {
+
+        if (groupCodeType == null) {
+            return false;
+        }
 
         Optional<GroupCode> parsedPlanGroupCode =
                 parseGroupCode(planGroupCode);
@@ -78,32 +116,35 @@ public class CosmosGroupCodeMatcher {
             return false;
         }
 
+        PrefixRules rules = rulesByType.get(groupCodeType);
+
+        if (rules == null) {
+            return false;
+        }
+
         GroupCode planCode = parsedPlanGroupCode.get();
         String prefix = planCode.prefix();
 
         /*
-         * CAL / MSP / MEC / FLA / PPL / MTK
-         * always return false.
+         * Known mismatched prefixes always return false.
          */
-        if (MISMATCHED_PREFIXES.contains(prefix)) {
+        if (rules.mismatchedPrefixes().contains(prefix)) {
             return false;
         }
 
         /*
-         * Any other valid prefix that does not require
-         * special Cosmos comparison returns true.
+         * Prefix does not require any special Cosmos comparison.
          */
-        if (!SPECIAL_PREFIXES.contains(prefix)) {
+        if (!rules.specialPrefixes().contains(prefix)) {
             return true;
         }
 
-        /*
-         * At this point the prefix is one of:
-         * NTL / OEB / BNA / OHO.
-         *
-         * Get configured Cosmos CODE + DATE combinations
-         * only for the matching prefix.
-         */
+        Map<String, Set<String>> cosmosCodesByPrefix =
+                cosmosCodesByType.getOrDefault(
+                        groupCodeType,
+                        Collections.emptyMap()
+                );
+
         Set<String> configuredCodeAndDates =
                 cosmosCodesByPrefix.getOrDefault(
                         prefix,
@@ -111,7 +152,7 @@ public class CosmosGroupCodeMatcher {
                 );
 
         /*
-         * Special prefix must exist in Cosmos configuration.
+         * Special prefix must have Cosmos configuration.
          */
         if (configuredCodeAndDates.isEmpty()) {
             return false;
@@ -126,26 +167,52 @@ public class CosmosGroupCodeMatcher {
                 );
 
         /*
-         * BNA / OHO:
-         * true only when CODE + DATE match.
+         * ALPHA:
+         *   BNA/OHO -> true when CODE + DATE match.
+         *
+         * BRAVO:
+         *   SLC/BNA/OEB/PNX/BHM -> true when CODE + DATE match.
          */
-        if (MATCH_REQUIRED_PREFIXES.contains(prefix)) {
+        if (rules.matchRequiredPrefixes().contains(prefix)) {
             return codeAndDateMatch;
         }
 
         /*
-         * NTL / OEB:
-         * true only when CODE + DATE do not match.
+         * ALPHA:
+         *   NTL/OEB -> true when CODE + DATE do NOT match.
+         *
+         * BRAVO:
+         *   OHO -> true when CODE + DATE does NOT match.
          */
         return !codeAndDateMatch;
     }
 
-    /**
-     * Builds an immutable lookup of configured Cosmos CODE + DATE values
-     * grouped by the special Cosmos prefixes.
+    /*
+     * Optional convenience method to preserve existing ALPHA behavior.
+     *
+     * Existing calls:
+     * cosmosGroupCodeMatcher.matches(planGroupCode)
+     *
+     * will continue to use ALPHA.
      */
+    public boolean matches(String planGroupCode) {
+        return matches(planGroupCode, GroupCodeType.ALPHA);
+    }
+
+    private static Map<GroupCodeType, PrefixRules> createRules() {
+
+        Map<GroupCodeType, PrefixRules> rules =
+                new EnumMap<>(GroupCodeType.class);
+
+        rules.put(GroupCodeType.ALPHA, ALPHA_RULES);
+        rules.put(GroupCodeType.BRAVO, BRAVO_RULES);
+
+        return Map.copyOf(rules);
+    }
+
     private static Map<String, Set<String>> buildLookupMap(
-            List<String> cosmosGroupCodes) {
+            List<String> cosmosGroupCodes,
+            Set<String> specialPrefixes) {
 
         if (cosmosGroupCodes == null || cosmosGroupCodes.isEmpty()) {
             return Collections.emptyMap();
@@ -165,14 +232,10 @@ public class CosmosGroupCodeMatcher {
             GroupCode groupCode = parsedGroupCode.get();
 
             /*
-             * The config lookup is only needed for the four
-             * prefixes that require Cosmos comparison.
-             *
-             * parseGroupCode() intentionally does NOT perform
-             * this validation because the same parser is also
-             * used for incoming planGroupCode values.
+             * Only prefixes requiring CODE + DATE comparison
+             * need to be stored in the lookup map.
              */
-            if (!SPECIAL_PREFIXES.contains(groupCode.prefix())) {
+            if (!specialPrefixes.contains(groupCode.prefix())) {
                 continue;
             }
 
@@ -201,19 +264,17 @@ public class CosmosGroupCodeMatcher {
         return Map.copyOf(immutableLookup);
     }
 
-    /**
-     * Parses the first three attributes of a group code.
+    /*
+     * Parses only the structure.
      *
-     * <p>This method only validates the structure of the value.
-     * It intentionally does not validate whether the prefix belongs
-     * to SPECIAL_PREFIXES because it is used for both Cosmos
-     * configuration values and incoming plan group codes.</p>
+     * It intentionally does NOT validate prefix business rules because
+     * the same parser is used for ALPHA, BRAVO and incoming plan codes.
      *
-     * <p>Examples:</p>
-     * <pre>
-     * BNA:90330:20220303       -> BNA, 90330, 20220303
-     * BNA:90330:20220303:M:008 -> BNA, 90330, 20220303
-     * </pre>
+     * BNA:90330:20220303
+     * -> BNA / 90330 / 20220303
+     *
+     * BNA:90330:20220303:M:008
+     * -> BNA / 90330 / 20220303
      */
     private static Optional<GroupCode> parseGroupCode(String groupCode) {
 
@@ -221,10 +282,6 @@ public class CosmosGroupCodeMatcher {
             return Optional.empty();
         }
 
-        /*
-         * Limit of 4 avoids unnecessarily splitting everything
-         * after the first three required attributes.
-         */
         String[] parts =
                 groupCode.split(DELIMITER, SPLIT_LIMIT);
 
@@ -262,6 +319,41 @@ public class CosmosGroupCodeMatcher {
             String date) {
 
         return code + DELIMITER + date;
+    }
+
+    public enum GroupCodeType {
+        ALPHA,
+        BRAVO
+    }
+
+    private record PrefixRules(
+            Set<String> matchRequiredPrefixes,
+            Set<String> mismatchRequiredPrefixes,
+            Set<String> mismatchedPrefixes) {
+
+        private PrefixRules {
+            matchRequiredPrefixes =
+                    Set.copyOf(matchRequiredPrefixes);
+
+            mismatchRequiredPrefixes =
+                    Set.copyOf(mismatchRequiredPrefixes);
+
+            mismatchedPrefixes =
+                    Set.copyOf(mismatchedPrefixes);
+        }
+
+        private Set<String> specialPrefixes() {
+
+            Set<String> prefixes = new HashSet<>(
+                    matchRequiredPrefixes
+            );
+
+            prefixes.addAll(
+                    mismatchRequiredPrefixes
+            );
+
+            return Set.copyOf(prefixes);
+        }
     }
 
     private record GroupCode(
