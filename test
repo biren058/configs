@@ -1,87 +1,186 @@
-test {
-    dependsOn 'cleanTest'
+package com.example.service;
 
-    systemProperty 'spring.profiles.active', springProfile
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
-    test.enabled = true
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
-    /*
-     * ==============================================================
-     * PARALLEL UNIT TEST EXECUTION
-     * ==============================================================
-     *
-     * Runs test classes/specifications across multiple Gradle
-     * test-worker JVMs.
-     *
-     * Example:
-     *   8 CPU cores  -> 4 parallel workers
-     *   12 CPU cores -> 6 parallel workers
-     *   16 CPU cores -> 8 parallel workers
-     *
-     * Using ~50% of available processors is a good starting point
-     * for CI/Jenkins because it avoids starving Gradle, compilation,
-     * Sonar, JaCoCo and other processes.
-     */
-    int availableProcessors = Runtime.runtime.availableProcessors()
+@Component
+public class CosmosGroupCodeMatcher {
 
-    maxParallelForks = Math.max(
-            1,
-            (availableProcessors / 2) as int
-    )
+    private static final String DELIMITER = ":";
+    private static final int EXPECTED_PARTS = 3;
 
-    /*
-     * Keep each worker JVM reasonably sized.
-     *
-     * Change these only if your project needs more memory.
-     */
-    minHeapSize = "256m"
-    maxHeapSize = "1024m"
+    private static final Set<String> TRUE_WHEN_DIFFERENT =
+            Set.of("NTL", "OEB");
 
-    /*
-     * Reuse worker JVMs.
-     *
-     * forkEvery = 0 means Gradle does NOT create a brand-new JVM
-     * for every test class. This is significantly faster when there
-     * are 1700+ tests.
-     */
-    forkEvery = 0
+    private static final Set<String> TRUE_WHEN_MATCH =
+            Set.of("BNA", "OHO");
 
-    /*
-     * Fail build normally when a unit test fails.
-     */
-    ignoreFailures = false
+    private static final Set<String> SUPPORTED_PREFIXES =
+            Set.of("NTL", "OEB", "BNA", "OHO");
 
-    /*
-     * Useful test output.
-     */
-    testLogging {
-        events "PASSED", "STARTED", "FAILED", "SKIPPED"
+    private final Map<String, Set<String>> cosmosCodesByPrefix;
 
-        exceptionFormat = "FULL"
+    public CosmosGroupCodeMatcher(
+            @Value("${cosmos.group-codes:}") List<String> cosmosGroupCodes) {
 
-        showExceptions = true
-        showCauses = true
-        showStackTraces = true
+        this.cosmosCodesByPrefix =
+                buildLookupMap(cosmosGroupCodes);
     }
 
-    /*
-     * Optional but useful when debugging parallel execution.
-     *
-     * Shows which Gradle Test Worker executed the test.
-     */
-    beforeTest { descriptor ->
-        logger.info(
-                "Running test: ${descriptor.className}.${descriptor.name}"
-        )
+    public boolean matches(String planGroupCode) {
+
+        Optional<GroupCode> parsedPlanGroupCode =
+                parseGroupCode(planGroupCode);
+
+        if (parsedPlanGroupCode.isEmpty()) {
+            return false;
+        }
+
+        GroupCode planCode = parsedPlanGroupCode.get();
+
+        Set<String> configuredCodeAndDates =
+                cosmosCodesByPrefix.getOrDefault(
+                        planCode.prefix(),
+                        Collections.emptySet()
+                );
+
+        /*
+         * Prefix must exist in the configured Cosmos group codes.
+         */
+        if (configuredCodeAndDates.isEmpty()) {
+            return false;
+        }
+
+        boolean codeAndDateMatch =
+                configuredCodeAndDates.contains(
+                        buildCodeAndDateKey(
+                                planCode.code(),
+                                planCode.date()
+                        )
+                );
+
+        /*
+         * BNA / OHO:
+         * return true only when CODE + DATE match.
+         */
+        if (TRUE_WHEN_MATCH.contains(planCode.prefix())) {
+            return codeAndDateMatch;
+        }
+
+        /*
+         * NTL / OEB:
+         * return true only when CODE + DATE do not match.
+         */
+        if (TRUE_WHEN_DIFFERENT.contains(planCode.prefix())) {
+            return !codeAndDateMatch;
+        }
+
+        return false;
     }
 
-    /*
-     * Print the parallel configuration once.
-     */
-    doFirst {
-        logger.lifecycle(
-                "Running unit tests with ${maxParallelForks} parallel test workers " +
-                "(${availableProcessors} processors available)"
-        )
+    private static Map<String, Set<String>> buildLookupMap(
+            List<String> cosmosGroupCodes) {
+
+        if (cosmosGroupCodes == null || cosmosGroupCodes.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, Set<String>> lookup = new HashMap<>();
+
+        for (String cosmosGroupCode : cosmosGroupCodes) {
+
+            Optional<GroupCode> parsedGroupCode =
+                    parseGroupCode(cosmosGroupCode);
+
+            if (parsedGroupCode.isEmpty()) {
+                continue;
+            }
+
+            GroupCode groupCode = parsedGroupCode.get();
+
+            lookup.computeIfAbsent(
+                            groupCode.prefix(),
+                            key -> new HashSet<>()
+                    )
+                    .add(
+                            buildCodeAndDateKey(
+                                    groupCode.code(),
+                                    groupCode.date()
+                            )
+                    );
+        }
+
+        Map<String, Set<String>> immutableLookup = new HashMap<>();
+
+        lookup.forEach(
+                (prefix, values) ->
+                        immutableLookup.put(
+                                prefix,
+                                Set.copyOf(values)
+                        )
+        );
+
+        return Map.copyOf(immutableLookup);
+    }
+
+    private static Optional<GroupCode> parseGroupCode(String groupCode) {
+
+        if (groupCode == null || groupCode.isBlank()) {
+            return Optional.empty();
+        }
+
+        String[] parts =
+                groupCode.split(DELIMITER, -1);
+
+        if (parts.length != EXPECTED_PARTS) {
+            return Optional.empty();
+        }
+
+        String prefix =
+                parts[0].trim().toUpperCase(Locale.ROOT);
+
+        String code =
+                parts[1].trim();
+
+        String date =
+                parts[2].trim();
+
+        if (prefix.isEmpty()
+                || code.isEmpty()
+                || date.isEmpty()
+                || !SUPPORTED_PREFIXES.contains(prefix)) {
+
+            return Optional.empty();
+        }
+
+        return Optional.of(
+                new GroupCode(
+                        prefix,
+                        code,
+                        date
+                )
+        );
+    }
+
+    private static String buildCodeAndDateKey(
+            String code,
+            String date) {
+
+        return code + DELIMITER + date;
+    }
+
+    private record GroupCode(
+            String prefix,
+            String code,
+            String date) {
     }
 }
