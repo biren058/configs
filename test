@@ -1,439 +1,1490 @@
-package com.example.service
-
-import spock.lang.Specification
-import spock.lang.Unroll
-
-import static com.example.service.CosmosGroupCodeMatcher.GroupCodeType.DENTAL
-import static com.example.service.CosmosGroupCodeMatcher.GroupCodeType.VISION
-
-class CosmosGroupCodeMatcherSpec extends Specification {
-
-    private static final List<String> DENTAL_CODES = [
-            "BNA:90330:20220303",
-            "OHO:90440:20220404",
-            "NTL:90110:20220101",
-            "OEB:90220:20220202",
-
-            // duplicate value to exercise Set behavior
-            "BNA:90330:20220303",
-
-            // valid but non-special config entry -> ignored by lookup
-            "XYZ:99999:20221212",
-
-            // malformed config entries -> ignored
-            null,
-            "",
-            "   ",
-            "BAD",
-            "BAD:ONLY",
-            ":12345:20220101",
-            "ABC::20220101",
-            "ABC:12345:"
-    ]
-
-    private static final List<String> VISION_CODES = [
-            "SLC:11111:20220505",
-            "BNA:22222:20220606",
-            "OEB:33333:20220707",
-            "PNX:44444:20220808",
-            "BHM:55555:20220909",
-            "OHO:66666:20221010",
-
-            // valid but non-special config entry -> ignored by lookup
-            "XYZ:77777:20221111",
-
-            // malformed config entries -> ignored
-            null,
-            "",
-            "BAD",
-            "BAD:ONLY",
-            ":12345:20220101",
-            "ABC::20220101",
-            "ABC:12345:"
-    ]
-
-    def matcher = new CosmosGroupCodeMatcher(DENTAL_CODES, VISION_CODES)
-
-    def "constructor should support null and empty configuration lists"() {
-        expect:
-        new CosmosGroupCodeMatcher(null, null) != null
-        new CosmosGroupCodeMatcher([], []) != null
-        new CosmosGroupCodeMatcher(null, []) != null
-        new CosmosGroupCodeMatcher([], null) != null
-    }
-
-    def "matches should return false when groupCodeType is null"() {
-        expect:
-        !matcher.matches("BNA:90330:20220303", null)
-    }
-
-    @Unroll
-    def "matches should return false for invalid planGroupCode '#planGroupCode'"() {
-        expect:
-        !matcher.matches(planGroupCode, DENTAL)
-
-        where:
-        planGroupCode << [
-                null,
-                "",
-                "   ",
-                "BNA",
-                "BNA:90330",
-                ":90330:20220303",
-                "BNA::20220303",
-                "BNA:90330:"
-        ]
-    }
-
-    @Unroll
-    def "dental mismatched prefix '#prefix' should always return false"() {
-        expect:
-        !matcher.matches("${prefix}:12345:20250101", DENTAL)
-
-        where:
-        prefix << ["CAL", "MSP", "MEC", "FLA", "PPL", "MTK"]
-    }
-
-    @Unroll
-    def "vision mismatched prefix '#prefix' should always return false"() {
-        expect:
-        !matcher.matches("${prefix}:12345:20250101", VISION)
-
-        where:
-        prefix << [
-                "ATL", "CAL", "CHS", "ETX", "FLA",
-                "GSO", "KLC", "MPC", "NEX", "NTL",
-                "NYC", "PPL", "PVS", "RAM", "STM"
-        ]
-    }
-
-    def "dental non-special prefix should return true"() {
-        expect:
-        matcher.matches("XYZ:12345:20250101", DENTAL)
-    }
-
-    def "vision non-special prefix should return true"() {
-        expect:
-        matcher.matches("XYZ:12345:20250101", VISION)
-    }
-
-    @Unroll
-    def "dental match-required prefix '#prefix' should return true when code and date match"() {
-        expect:
-        matcher.matches(planGroupCode, DENTAL)
-
-        where:
-        prefix | planGroupCode
-        "BNA"  | "BNA:90330:20220303"
-        "OHO"  | "OHO:90440:20220404"
-    }
-
-    @Unroll
-    def "dental match-required prefix '#prefix' should return false when code or date do not match"() {
-        expect:
-        !matcher.matches(planGroupCode, DENTAL)
-
-        where:
-        prefix | planGroupCode
-        "BNA"  | "BNA:99999:20220303"
-        "BNA"  | "BNA:90330:20990101"
-        "OHO"  | "OHO:99999:20220404"
-        "OHO"  | "OHO:90440:20990101"
-    }
-
-    @Unroll
-    def "dental mismatch-required prefix '#prefix' should return false when code and date match"() {
-        expect:
-        !matcher.matches(planGroupCode, DENTAL)
-
-        where:
-        prefix | planGroupCode
-        "NTL"  | "NTL:90110:20220101"
-        "OEB"  | "OEB:90220:20220202"
-    }
-
-    @Unroll
-    def "dental mismatch-required prefix '#prefix' should return true when code or date do not match"() {
-        expect:
-        matcher.matches(planGroupCode, DENTAL)
-
-        where:
-        prefix | planGroupCode
-        "NTL"  | "NTL:99999:20220101"
-        "NTL"  | "NTL:90110:20990101"
-        "OEB"  | "OEB:99999:20220202"
-        "OEB"  | "OEB:90220:20990101"
-    }
-
-    @Unroll
-    def "vision match-required prefix '#prefix' should return true when code and date match"() {
-        expect:
-        matcher.matches(planGroupCode, VISION)
-
-        where:
-        prefix | planGroupCode
-        "SLC"  | "SLC:11111:20220505"
-        "BNA"  | "BNA:22222:20220606"
-        "OEB"  | "OEB:33333:20220707"
-        "PNX"  | "PNX:44444:20220808"
-        "BHM"  | "BHM:55555:20220909"
-    }
-
-    @Unroll
-    def "vision match-required prefix '#prefix' should return false when code or date do not match"() {
-        expect:
-        !matcher.matches(planGroupCode, VISION)
-
-        where:
-        prefix | planGroupCode
-        "SLC"  | "SLC:99999:20220505"
-        "BNA"  | "BNA:22222:20990101"
-        "OEB"  | "OEB:99999:20220707"
-        "PNX"  | "PNX:44444:20990101"
-        "BHM"  | "BHM:99999:20220909"
-    }
-
-    def "vision mismatch-required OHO should return false when code and date match"() {
-        expect:
-        !matcher.matches("OHO:66666:20221010", VISION)
-    }
-
-    @Unroll
-    def "vision mismatch-required OHO should return true when code or date do not match"() {
-        expect:
-        matcher.matches(planGroupCode, VISION)
-
-        where:
-        planGroupCode << [
-                "OHO:99999:20221010",
-                "OHO:66666:20990101"
-        ]
-    }
-
-    def "special prefix should return false when no configured code exists for that prefix"() {
-        given:
-        def emptyMatcher = new CosmosGroupCodeMatcher([], [])
-
-        expect:
-        !emptyMatcher.matches("BNA:90330:20220303", DENTAL)
-        !emptyMatcher.matches("NTL:90110:20220101", DENTAL)
-        !emptyMatcher.matches("SLC:11111:20220505", VISION)
-        !emptyMatcher.matches("OHO:66666:20221010", VISION)
-    }
-
-    def "default matches method should use DENTAL rules"() {
-        expect:
-        matcher.matches("BNA:90330:20220303")
-        !matcher.matches("BNA:99999:20220303")
-        !matcher.matches("CAL:12345:20250101")
-        matcher.matches("XYZ:12345:20250101")
-    }
-
-    def "plan group code should ignore attributes after first three parts"() {
-        expect:
-        matcher.matches("BNA:90330:20220303:M:008", DENTAL)
-        matcher.matches("SLC:11111:20220505:EXTRA:VALUE", VISION)
-        !matcher.matches("NTL:90110:20220101:M:008", DENTAL)
-    }
-
-    def "prefix should be case insensitive because parser normalizes to uppercase"() {
-        expect:
-        matcher.matches("bna:90330:20220303", DENTAL)
-        !matcher.matches("ntl:90110:20220101", DENTAL)
-        matcher.matches("slc:11111:20220505", VISION)
-        !matcher.matches("oho:66666:20221010", VISION)
-    }
-
-    def "parser should trim whitespace around prefix code and date"() {
-        expect:
-        matcher.matches("  bna : 90330 : 20220303 ", DENTAL)
-        matcher.matches(" slc : 11111 : 20220505 ", VISION)
-    }
-
-    def "duplicate configured group codes should not affect matching behavior"() {
-        expect:
-        matcher.matches("BNA:90330:20220303", DENTAL)
-    }
-
-    def "valid non-special configured entries should not be used for special lookup logic"() {
-        expect:
-        matcher.matches("XYZ:99999:20221212", DENTAL)
-        matcher.matches("XYZ:77777:20221111", VISION)
-    }
-
-    def "dental and vision should apply different rules for same prefix"() {
-        expect:
-        // OEB is mismatch-required in DENTAL
-        !matcher.matches("OEB:90220:20220202", DENTAL)
-        matcher.matches("OEB:99999:20220202", DENTAL)
-
-        // OEB is match-required in VISION
-        matcher.matches("OEB:33333:20220707", VISION)
-        !matcher.matches("OEB:99999:20220707", VISION)
-
-        // OHO is match-required in DENTAL
-        matcher.matches("OHO:90440:20220404", DENTAL)
-        !matcher.matches("OHO:99999:20220404", DENTAL)
-
-        // OHO is mismatch-required in VISION
-        !matcher.matches("OHO:66666:20221010", VISION)
-        matcher.matches("OHO:99999:20221010", VISION)
-    }
-
-    def "same prefix should use only group codes configured for selected type"() {
-        expect:
-        matcher.matches("BNA:90330:20220303", DENTAL)
-        !matcher.matches("BNA:90330:20220303", VISION)
-
-        matcher.matches("BNA:22222:20220606", VISION)
-        !matcher.matches("BNA:22222:20220606", DENTAL)
-    }
-
-    def "configuration entries with additional attributes should use first three attributes only"() {
-        given:
-        def customMatcher = new CosmosGroupCodeMatcher(
-                ["BNA:12345:20250101:M:008"],
-                ["SLC:54321:20250202:X:Y"]
-        )
-
-        expect:
-        customMatcher.matches("BNA:12345:20250101", DENTAL)
-        customMatcher.matches("SLC:54321:20250202", VISION)
-    }
-
-    def "lowercase configured prefixes should be normalized"() {
-        given:
-        def customMatcher = new CosmosGroupCodeMatcher(
-                ["bna:12345:20250101", "ntl:54321:20250202"],
-                ["slc:11111:20250303", "oho:22222:20250404"]
-        )
-
-        expect:
-        customMatcher.matches("BNA:12345:20250101", DENTAL)
-        !customMatcher.matches("NTL:54321:20250202", DENTAL)
-
-        customMatcher.matches("SLC:11111:20250303", VISION)
-        !customMatcher.matches("OHO:22222:20250404", VISION)
-    }
-
-    def "configuration entries should trim prefix code and date"() {
-        given:
-        def customMatcher = new CosmosGroupCodeMatcher(
-                [" BNA : 12345 : 20250101 "],
-                [" SLC : 54321 : 20250202 "]
-        )
-
-        expect:
-        customMatcher.matches("BNA:12345:20250101", DENTAL)
-        customMatcher.matches("SLC:54321:20250202", VISION)
-    }
-
-    def "malformed configuration entries should be skipped without failure"() {
-        given:
-        def customMatcher = new CosmosGroupCodeMatcher(
-                [
-                        null,
-                        "",
-                        " ",
-                        "INVALID",
-                        "BNA:",
-                        ":12345:20250101",
-                        "BNA::20250101",
-                        "BNA:12345:",
-                        "BNA:12345:20250101"
-                ],
-                [
-                        null,
-                        "INVALID",
-                        "SLC::20250202",
-                        "SLC:54321:"
-                ]
-        )
-
-        expect:
-        customMatcher.matches("BNA:12345:20250101", DENTAL)
-        !customMatcher.matches("SLC:54321:20250202", VISION)
-    }
-
-    def "empty dental configuration should not affect vision configuration"() {
-        given:
-        def customMatcher = new CosmosGroupCodeMatcher(
-                [],
-                ["SLC:11111:20220505"]
-        )
-
-        expect:
-        !customMatcher.matches("BNA:90330:20220303", DENTAL)
-        customMatcher.matches("SLC:11111:20220505", VISION)
-    }
-
-    def "empty vision configuration should not affect dental configuration"() {
-        given:
-        def customMatcher = new CosmosGroupCodeMatcher(
-                ["BNA:90330:20220303"],
-                []
-        )
-
-        expect:
-        customMatcher.matches("BNA:90330:20220303", DENTAL)
-        !customMatcher.matches("SLC:11111:20220505", VISION)
-    }
-
-    @Unroll
-    def "plan with empty required field should return false - '#planGroupCode'"() {
-        expect:
-        !matcher.matches(planGroupCode, DENTAL)
-
-        where:
-        planGroupCode << [
-                ":CODE:DATE",
-                "BNA::DATE",
-                "BNA:CODE:",
-                " :CODE:DATE",
-                "BNA: :DATE",
-                "BNA:CODE: "
-        ]
-    }
-
-    def "extra delimiter content should not change first three parsed attributes"() {
-        expect:
-        matcher.matches("BNA:90330:20220303:", DENTAL)
-        matcher.matches("BNA:90330:20220303:::anything", DENTAL)
-    }
-
-    def "non-special prefix remains true even when no cosmos configuration exists"() {
-        given:
-        def emptyMatcher = new CosmosGroupCodeMatcher(null, null)
-
-        expect:
-        emptyMatcher.matches("ABC:12345:20250101", DENTAL)
-        emptyMatcher.matches("ABC:12345:20250101", VISION)
-    }
-
-    def "mismatched prefix remains false even when configuration is empty"() {
-        given:
-        def emptyMatcher = new CosmosGroupCodeMatcher(null, null)
-
-        expect:
-        !emptyMatcher.matches("CAL:12345:20250101", DENTAL)
-        !emptyMatcher.matches("ATL:12345:20250101", VISION)
-    }
-
-    def "all dental special prefixes are exercised"() {
-        expect:
-        matcher.matches("BNA:90330:20220303", DENTAL)
-        matcher.matches("OHO:90440:20220404", DENTAL)
-        !matcher.matches("NTL:90110:20220101", DENTAL)
-        !matcher.matches("OEB:90220:20220202", DENTAL)
-    }
-
-    def "all vision special prefixes are exercised"() {
-        expect:
-        matcher.matches("SLC:11111:20220505", VISION)
-        matcher.matches("BNA:22222:20220606", VISION)
-        matcher.matches("OEB:33333:20220707", VISION)
-        matcher.matches("PNX:44444:20220808", VISION)
-        matcher.matches("BHM:55555:20220909", VISION)
-        !matcher.matches("OHO:66666:20221010", VISION)
-    }
-}
+MASTER PROMPT: Brownfield Enterprise Spring Boot Service — Deep Reverse Engineering, AI-DLC Analysis & Custom AI Agent Architecture
+
+YOUR ROLE
+
+Act as a coordinated team of highly experienced software engineering specialists:
+
+1. Principal Software Architect
+2. Senior Java / Spring Boot Engineer
+3. Enterprise Integration Architect
+4. Distributed Systems Engineer
+5. GraphQL Specialist
+6. REST API Specialist
+7. SOAP Integration Specialist
+8. Enterprise Messaging Specialist
+9. Performance and Concurrency Engineer
+10. Site Reliability Engineer
+11. Software Testing Architect
+12. DevSecOps Engineer
+13. AI-DLC Methodology Architect
+14. AI Agent Architect
+15. IntelliJ IDEA and GitHub Copilot Customization Specialist
+
+Your mission is to perform a comprehensive, evidence-based analysis of the existing brownfield application currently open in IntelliJ IDEA, then identify, design, prioritize, and explain the most valuable specialized AI agents that could improve development, maintenance, testing, debugging, integration, performance, reliability, and production support.
+
+You are not being asked to implement a new business feature.
+
+Your primary deliverable is an implementation-ready, repository-specific AI agent architecture.
+
+Do not begin by proposing generic agents.
+
+First understand the actual application.
+
+---
+
+SECTION 1 — NON-NEGOTIABLE OPERATING RULES
+
+Rule 1: Brownfield-first analysis
+
+This is an existing enterprise application.
+
+Its current implementation, established architecture, coding patterns, domain logic, and integration contracts are the starting point.
+
+Before recommending any agent:
+
+- Explore the repository.
+- Identify modules and dependencies.
+- Trace the application architecture.
+- Identify important execution flows.
+- Understand backend integrations.
+- Understand asynchronous processing.
+- Understand resilience mechanisms.
+- Understand testing strategies.
+- Understand deployment and operational architecture.
+- Identify recurring engineering difficulties.
+
+Do not assume a particular architecture simply because the project uses Spring Boot.
+
+Rule 2: Evidence-based conclusions
+
+Every important architectural finding and agent recommendation must reference evidence from the repository.
+
+Include:
+
+- Relevant file paths.
+- Class or interface names.
+- Method names where applicable.
+- Configuration properties.
+- Supporting tests.
+- Dependencies.
+- Relevant execution flows.
+- Architectural limitations.
+
+Differentiate clearly between:
+
+- CONFIRMED: Directly verified from code or configuration.
+- INFERRED: Reasonable conclusion based on evidence.
+- UNKNOWN: Not established from available repository content.
+- RECOMMENDED: Proposed engineering improvement.
+
+Never invent classes, endpoints, frameworks, or infrastructure.
+
+Rule 3: Read-only discovery
+
+During the initial analysis:
+
+- Do not modify application source code.
+- Do not refactor existing classes.
+- Do not update dependencies.
+- Do not change application properties.
+- Do not change deployment configurations.
+- Do not create custom agents yet.
+- Do not install plugins or frameworks.
+- Do not execute deployments.
+- Do not connect to production systems.
+
+Use safe, read-only inspection.
+
+If running build or test commands would generate files or modify the environment, obtain approval first.
+
+After completing discovery, present recommendations for review.
+
+Only create agent configuration files after I explicitly approve the implementation plan.
+
+Rule 4: Comprehensive repository coverage
+
+Do not analyze only the currently open class.
+
+Explore the entire accessible repository, including:
+
+- Root and submodule build files.
+- Java/Kotlin source directories.
+- Resources and configuration.
+- REST controllers.
+- Service and orchestration layers.
+- Backend connectors.
+- GraphQL-related classes.
+- SOAP clients.
+- Messaging components.
+- DTOs and domain models.
+- Data mappers.
+- Exception handling.
+- Security configuration.
+- Async/concurrency utilities.
+- Resilience configurations.
+- Unit and integration tests.
+- CI/CD files.
+- Kubernetes/OpenShift files.
+- Existing developer documentation.
+- Existing AI or Copilot configuration.
+
+Inspect generated-source directories only when necessary.
+
+Exclude irrelevant build outputs, binaries, dependency caches, and generated artifacts from detailed inspection.
+
+If the repository is too large to examine in one session, analyze it in clearly defined batches and retain a coverage inventory.
+
+Do not claim to have examined the whole repository unless coverage is demonstrated.
+
+Rule 5: Protect enterprise information
+
+Treat all repository material as potentially sensitive.
+
+- Do not display or copy credentials, tokens, certificates, or private keys.
+- Do not reproduce real patient/member information or protected health information.
+- Do not send data to external services unless explicitly authorized.
+- Do not modify secret-bearing configuration.
+- Use synthetic examples.
+- Recommend least-privilege tools and read-only access by default.
+- Follow existing organizational policies.
+
+---
+
+SECTION 2 — PHASE A: COMPLETE APPLICATION DISCOVERY
+
+Begin with a structured repository inventory.
+
+A1. Repository and technology discovery
+
+Identify:
+
+- Repository structure.
+- Number of modules.
+- Programming languages and versions.
+- Java version.
+- Spring Boot version.
+- Spring Framework components.
+- Spring GraphQL usage.
+- Maven or Gradle.
+- HTTP client libraries.
+- SOAP libraries.
+- MQ technologies.
+- JSON/XML libraries.
+- Resilience libraries.
+- Logging libraries.
+- Observability instrumentation.
+- Testing frameworks.
+- Security libraries.
+- Deployment technologies.
+- CI/CD tools.
+
+Output:
+
+Technology Stack Inventory
+
+For every major technology, include:
+
+1. Technology name.
+2. Detected version, when available.
+3. Where it is configured.
+4. Where it is used.
+5. Its architectural purpose.
+6. Any noteworthy compatibility or maintenance concerns.
+
+A2. Architecture reverse engineering
+
+Identify all major architectural layers.
+
+Examples to investigate:
+
+- API/controller layer.
+- Authentication/authorization layer.
+- Request validation layer.
+- Business service layer.
+- Orchestration/aggregation layer.
+- Backend integration layer.
+- Data transformation layer.
+- Persistence layer, if present.
+- Event-driven processing layer.
+- Response construction layer.
+- Exception handling layer.
+- Operational infrastructure.
+
+Build an evidence-backed architecture map.
+
+Identify critical dependencies and coupling between components.
+
+Generate a Mermaid architecture diagram.
+
+The diagram must represent the actual implementation, not an assumed reference architecture.
+
+A3. Endpoint discovery
+
+Discover all exposed endpoints where practical.
+
+For each endpoint or endpoint group, identify:
+
+- HTTP method.
+- URL/path.
+- Controller class.
+- Service method.
+- Required headers.
+- Authentication behavior.
+- Request model.
+- Response model.
+- Downstream dependencies.
+- Synchronous/asynchronous behavior.
+- Error handling.
+- Relevant tests.
+
+Group endpoints into functional domains when appropriate.
+
+A4. End-to-end execution tracing
+
+Select representative execution paths that cover the major architectural patterns.
+
+Trace each path from:
+
+Incoming request
+→ Controller
+→ Validation/security
+→ Business service
+→ Orchestration
+→ Backend clients
+→ Response transformation
+→ Aggregation
+→ Exception handling
+→ Final response
+
+For each execution path:
+
+1. Identify the sequence of methods.
+2. Identify source files.
+3. Identify backend calls.
+4. Identify parallel and sequential operations.
+5. Identify transformation logic.
+6. Identify timeout and retry boundaries.
+7. Identify error propagation.
+8. Identify correlation ID propagation.
+9. Identify logging and metrics.
+10. Identify tests that verify the behavior.
+
+Provide Mermaid sequence diagrams for particularly complex flows.
+
+A5. Backend integration discovery
+
+Independently analyze every integration type actually found.
+
+GraphQL
+
+Investigate:
+
+- GraphQL clients.
+- Query generation.
+- Schema relationships.
+- Variables.
+- Aliases.
+- Resolver logic.
+- Nested data fetching.
+- DataLoader usage, if any.
+- Pagination.
+- Filtering.
+- Sorting.
+- Error handling.
+- GraphQL partial data.
+- Authentication/header propagation.
+- Query performance.
+- N+1 request patterns.
+- Schema versioning.
+
+REST
+
+Investigate:
+
+- RestTemplate, RestClient, WebClient, Retrofit, OkHttp, Feign, or other clients.
+- Client configuration.
+- Connection pooling.
+- Connect/read/response timeouts.
+- Retry policies.
+- Request interceptors.
+- Headers.
+- Serialization/deserialization.
+- HTTP status handling.
+- Circuit breakers.
+- Observability.
+- Client lifecycle management.
+
+SOAP
+
+Investigate:
+
+- WSDL integration.
+- Generated classes.
+- JAXB/XML mappings.
+- SOAP envelopes.
+- Namespaces.
+- SOAP faults.
+- Authentication.
+- Timeouts.
+- Connection management.
+- Legacy backend dependencies.
+
+Messaging / MQ
+
+Investigate whichever technology is present:
+
+- IBM MQ.
+- JMS.
+- Kafka.
+- RabbitMQ.
+- ActiveMQ.
+- Other messaging frameworks.
+
+Analyze:
+
+- Producers.
+- Consumers/listeners.
+- Queue/topic configuration.
+- Acknowledgment semantics.
+- Transactions.
+- Retry behavior.
+- Dead-letter handling.
+- Duplicate processing.
+- Idempotency.
+- Message ordering.
+- Correlation IDs.
+- Message schema evolution.
+- Request/reply versus fire-and-forget behavior.
+- Poison message handling.
+
+For each backend category, summarize current strengths, risks, recurring engineering challenges, and potential opportunities for specialized AI agents.
+
+Do not recommend integration-specific agents for technologies that are absent without clearly labeling them optional.
+
+---
+
+SECTION 3 — PHASE B: ADVANCED ENGINEERING ANALYSIS
+
+Perform deeper analysis of the most complex areas.
+
+B1. Concurrency and asynchronous execution
+
+Discover usage of:
+
+- CompletableFuture.
+- ExecutorService.
+- ThreadPoolExecutor.
+- Reactor Mono/Flux.
+- @Async.
+- Parallel streams.
+- Virtual threads, if present.
+- Scheduled tasks.
+- Callback-based asynchronous processing.
+
+Investigate:
+
+1. Thread pool creation and lifecycle.
+2. Executor sharing.
+3. Maximum concurrency.
+4. Queue capacity.
+5. Blocking versus nonblocking execution.
+6. Future composition.
+7. Exception propagation.
+8. Cancellation propagation.
+9. Timeout enforcement.
+10. Context propagation.
+11. ThreadLocal usage.
+12. Potential race conditions.
+13. Potential deadlocks.
+14. Resource saturation.
+15. Backend fan-out amplification.
+
+Identify whether parallelism is implemented safely.
+
+Distinguish proven defects from potential risks.
+
+B2. Performance architecture
+
+Analyze:
+
+- Request latency.
+- Downstream latency contribution.
+- Critical path.
+- Parallel versus sequential calls.
+- HTTP connection limits.
+- Worker thread requirements.
+- Serialization overhead.
+- Payload sizes.
+- Memory allocation.
+- Caching.
+- Backpressure.
+- Throughput bottlenecks.
+
+For fan-out services, explain capacity amplification.
+
+For example:
+
+If one incoming request creates N backend requests, assess the potential downstream request volume and concurrent in-flight calls.
+
+Do not claim that a particular throughput is achievable without measurements.
+
+Identify what telemetry and load tests would be required to validate performance recommendations.
+
+B3. Resilience and failure handling
+
+Investigate:
+
+- Resilience4j CircuitBreaker.
+- Retry.
+- TimeLimiter.
+- Bulkhead.
+- RateLimiter.
+- Fallbacks.
+- Backend-specific timeouts.
+- Exception classification.
+- Failure thresholds.
+- Half-open behavior.
+- Partial responses.
+- Cascading failures.
+- Recovery behavior.
+
+Determine whether resilience policies align with actual dependency characteristics.
+
+Identify retry amplification and timeout-budget risks.
+
+B4. Data mapping and business rules
+
+Examine:
+
+- DTO conversions.
+- JSON/XML transformations.
+- Date/time transformations.
+- Null handling.
+- Default values.
+- Enum mapping.
+- Boolean conversion.
+- Identifier mapping.
+- Conditional business logic.
+- Nested object transformations.
+- Aggregation precedence.
+- Source-specific normalization.
+- Validation rules.
+
+Identify fragile mappings and opportunities for automated consistency checking.
+
+B5. Security
+
+Analyze:
+
+- Authentication.
+- Authorization.
+- Role-based behavior.
+- Header propagation.
+- TLS configuration.
+- Secret management.
+- Sensitive logging.
+- Input validation.
+- Error message exposure.
+- Dependency vulnerabilities when evidence is available.
+- Privilege boundaries.
+
+Never claim a vulnerability has been proven without sufficient evidence.
+
+B6. Testing maturity
+
+Analyze:
+
+- Unit tests.
+- Integration tests.
+- Contract tests.
+- Performance tests.
+- Resilience tests.
+- Security tests.
+- MQ consumer tests.
+- Mock backend strategies.
+- Flaky tests.
+- Test data quality.
+- Coverage configuration.
+- CI execution.
+
+Identify testing gaps based on concrete functionality.
+
+Do not equate high line coverage with sufficient behavioral coverage.
+
+B7. Operations and production support
+
+Inspect available evidence for:
+
+- Splunk.
+- Structured logging.
+- Prometheus.
+- OpenTelemetry.
+- Distributed tracing.
+- Health endpoints.
+- Readiness/liveness probes.
+- Kubernetes/OpenShift.
+- Resource limits.
+- Autoscaling.
+- Deployment pipelines.
+- Environment-specific configuration.
+- Alerting.
+
+Do not assume access to production logs or systems.
+
+Recommend potential MCP integrations only when useful and explain permissions required.
+
+---
+
+SECTION 4 — PHASE C: ENGINEERING PAIN POINT DISCOVERY
+
+Based on the repository analysis, identify areas where AI agents could deliver measurable value.
+
+Evaluate at least these categories:
+
+1. Architecture understanding.
+2. Complex code navigation.
+3. Feature impact analysis.
+4. Backend integration development.
+5. GraphQL optimization.
+6. REST client reliability.
+7. SOAP modernization.
+8. MQ troubleshooting.
+9. Request orchestration.
+10. Concurrent execution.
+11. Performance optimization.
+12. Resilience engineering.
+13. Business rule analysis.
+14. Data transformation.
+15. API contract compatibility.
+16. Unit testing.
+17. Integration testing.
+18. Regression detection.
+19. Root cause analysis.
+20. Debugging.
+21. Security review.
+22. Observability.
+23. Production incident investigation.
+24. Deployment analysis.
+25. CI/CD troubleshooting.
+26. Dependency modernization.
+27. Documentation.
+28. Developer onboarding.
+29. Technical debt.
+30. AI-DLC workflow orchestration.
+
+For each category, provide:
+
+- Current implementation.
+- Confirmed challenges.
+- Potential challenges.
+- Supporting evidence.
+- Engineering impact.
+- Frequency of likely use.
+- Potential for AI automation.
+- Risks of automation.
+- Whether a dedicated agent is warranted.
+
+Do not recommend an agent merely because a category exists.
+
+---
+
+SECTION 5 — PHASE D: RECOMMEND THE BEST CUSTOM AGENTS
+
+Now use your findings to recommend the most valuable specialized agents for this particular codebase.
+
+Your recommendations must be based on discovered needs.
+
+Consider agents such as:
+
+Architecture
+
+- Architecture Intelligence Agent
+- Codebase Navigation Agent
+- Change Impact Analysis Agent
+- Business Rule Discovery Agent
+- Dependency Analysis Agent
+
+Backend integration
+
+- GraphQL Expert Agent
+- REST Client Expert Agent
+- SOAP Integration Agent
+- MQ Messaging Agent
+- Backend Orchestration Agent
+- API Contract Agent
+- Data Mapping Agent
+
+Performance and resilience
+
+- Performance Optimization Agent
+- Concurrency Expert Agent
+- Thread Pool Analysis Agent
+- Resilience4j Expert Agent
+- Failure Propagation Analysis Agent
+- JVM Performance Agent
+
+Development and quality
+
+- Feature Implementation Agent
+- Refactoring Agent
+- Code Review Agent
+- Unit Test Generator Agent
+- Integration Test Agent
+- Regression Analysis Agent
+- Test Scenario Generator Agent
+
+Operations
+
+- Root Cause Analysis Agent
+- Splunk Analysis Agent
+- Observability Agent
+- OpenShift Agent
+- CI/CD Troubleshooting Agent
+- Incident Investigation Agent
+
+AI-DLC
+
+- Requirements Analysis Agent
+- Solution Design Agent
+- Implementation Planning Agent
+- AI-DLC Workflow Orchestrator
+- Verification and Quality Gate Agent
+
+These are candidate ideas, not a mandatory final list.
+
+You must decide:
+
+- Which are genuinely needed?
+- Which should be combined?
+- Which would overlap?
+- Which can be simple reusable skills?
+- Which deserve standalone custom agents?
+- Which require external tools?
+- Which should be deferred?
+
+Prefer a maintainable set of high-value agents over an unnecessarily large collection.
+
+---
+
+SECTION 6 — AGENT SCORING AND PRIORITIZATION
+
+Create a weighted recommendation framework.
+
+For each candidate agent, evaluate:
+
+1. Relevance to actual architecture — 25%.
+2. Expected developer time savings — 20%.
+3. Reliability and quality improvement — 20%.
+4. Frequency of likely use — 15%.
+5. Feasibility with existing tools — 10%.
+6. Implementation and maintenance cost — 10%.
+
+Score each dimension from 1 to 5.
+
+Calculate a weighted score out of 100.
+
+Explain the scoring rationale.
+
+Classify agents as:
+
+- P0: Essential — implement first.
+- P1: High value — implement next.
+- P2: Advanced — implement when justified.
+- P3: Optional — limited current value.
+
+Output a ranked comparison table containing:
+
+| Rank | Agent | Priority | Score | Repository Evidence | Main Benefit | Complexity | Recommended Form |
+
+Recommended Form must be one of:
+
+- Custom Copilot agent.
+- Reusable Copilot skill.
+- Repository-level instructions.
+- External MCP-backed agent.
+- Standard automation/script.
+- Not recommended.
+
+Explain when a normal script, test, or IDE feature is preferable to an AI agent.
+
+---
+
+SECTION 7 — PHASE E: COMPLETE DESIGN FOR EVERY RECOMMENDED AGENT
+
+This is one of the most important sections.
+
+For EVERY recommended P0 and P1 agent, produce a complete, implementation-ready design.
+
+Do not provide only a name and short description.
+
+Use the following template.
+
+Agent: [NAME]
+
+1. Agent identity
+
+- Agent name.
+- Unique identifier.
+- Category.
+- AI-DLC phase.
+- Priority.
+- Purpose.
+- Target users.
+- Main engineering problems solved.
+
+2. Justification
+
+Explain:
+
+- Why this repository needs the agent.
+- Which specific components would benefit.
+- Which current engineering problems it addresses.
+- Why a specialized agent is appropriate.
+- Why existing generic Copilot behavior may be insufficient.
+
+Include exact supporting repository references.
+
+3. Responsibilities
+
+Define:
+
+- Primary responsibilities.
+- Secondary responsibilities.
+- Supported tasks.
+- Unsupported tasks.
+- Scope boundaries.
+
+4. Required knowledge
+
+Identify the repository knowledge the agent needs.
+
+Examples:
+
+- Architecture documents.
+- Specific packages.
+- Controllers.
+- Services.
+- Backend connectors.
+- Configuration.
+- GraphQL schemas.
+- WSDL files.
+- MQ message definitions.
+- DTOs.
+- Business rules.
+- Tests.
+- Operational runbooks.
+
+Use actual discovered paths.
+
+5. Tool requirements
+
+Identify the minimum tools required.
+
+Consider:
+
+- Repository search.
+- File reading.
+- Git history/diffs.
+- IntelliJ inspections.
+- IntelliJ debugger.
+- Build tools.
+- Test runners.
+- Static analysis.
+- MCP connectors.
+- Documentation retrieval.
+- Observability platforms.
+
+For every tool, specify:
+
+- Purpose.
+- Read/write permissions.
+- Required access.
+- Security concerns.
+- Whether it is essential or optional.
+- Whether it is actually available.
+
+Never assume an MCP server is installed.
+
+6. Detailed system instructions
+
+Write a complete agent instruction prompt containing:
+
+- Agent persona.
+- Technical expertise.
+- Repository context.
+- Operating rules.
+- Investigation workflow.
+- Decision-making principles.
+- Expected response format.
+- Required validation.
+- Safety boundaries.
+- Stop conditions.
+
+The instructions must be specific enough to be copied into a custom agent definition.
+
+Avoid vague directions such as "analyze thoroughly."
+
+7. Standard execution workflow
+
+Define the agent's step-by-step behavior.
+
+For example:
+
+1. Understand the user request.
+2. Locate related components.
+3. Trace dependencies.
+4. Examine configuration.
+5. Gather evidence.
+6. Identify possible approaches.
+7. Evaluate tradeoffs.
+8. Recommend a solution.
+9. Request approval when needed.
+10. Validate the proposed or implemented change.
+11. Summarize results.
+
+Customize this workflow for each agent.
+
+8. Inputs
+
+Define expected inputs, such as:
+
+- Endpoint.
+- Class name.
+- Method.
+- Git diff.
+- Exception stack trace.
+- Correlation ID.
+- API schema.
+- Feature requirement.
+- Performance concern.
+
+9. Outputs
+
+Define the exact response structure.
+
+Examples:
+
+- Architecture report.
+- Dependency graph.
+- Root-cause analysis.
+- Performance report.
+- Risk assessment.
+- Test plan.
+- Proposed code changes.
+- Review checklist.
+
+10. Example prompts
+
+Provide at least five realistic prompts specific to this service.
+
+Include:
+
+- Simple investigation.
+- Intermediate task.
+- Advanced task.
+- Complex multi-module scenario.
+- Failure or troubleshooting scenario.
+
+11. Guardrails
+
+Specify:
+
+- Read-only versus write access.
+- Files allowed to change.
+- Prohibited operations.
+- Sensitive data handling.
+- Human approval requirements.
+- Production access restrictions.
+- Evidence requirements.
+
+12. Success criteria
+
+Define measurable evaluation criteria.
+
+Examples:
+
+- Accurate class and dependency identification.
+- Correct execution path tracing.
+- Useful test generation.
+- Reduced investigation time.
+- No unintended modifications.
+- Correct handling of edge cases.
+- Evidence-backed recommendations.
+
+13. Verification scenarios
+
+Provide at least three test cases to verify the agent works correctly on this repository.
+
+Include expected behavior and failure conditions.
+
+14. Maintenance strategy
+
+Explain:
+
+- When agent instructions need updates.
+- How architecture changes affect the agent.
+- How stale references are detected.
+- How tool changes are managed.
+- Who should own the agent.
+
+15. Complete configuration
+
+Generate the full proposed configuration and instruction content.
+
+Use actual repository paths when known.
+
+Do not leave critical sections as generic placeholders.
+
+If configuration syntax or tool availability is uncertain, mark it as requiring verification.
+
+---
+
+SECTION 8 — PHASE F: INTELLIJ + GITHUB COPILOT IMPLEMENTATION BLUEPRINT
+
+Design a working implementation specifically for GitHub Copilot inside IntelliJ IDEA.
+
+Verify the features supported by the installed Copilot plugin where possible.
+
+Use supported capabilities rather than assuming VS Code features work identically in IntelliJ.
+
+Investigate the following configuration options:
+
+A. Repository-wide Copilot instructions
+
+Propose:
+
+.github/copilot-instructions.md
+
+Include repository-specific:
+
+- Architecture summary.
+- Language/framework conventions.
+- Coding standards.
+- Package structure.
+- Preferred error handling.
+- Async/concurrency rules.
+- Backend integration conventions.
+- Testing requirements.
+- Security requirements.
+- Operational requirements.
+- Rules for modifying existing code.
+
+Generate complete suggested file contents.
+
+B. Custom agent definitions
+
+Use the supported GitHub Copilot custom agent format.
+
+Propose files such as:
+
+.github/agents/architecture-intelligence.agent.md
+
+.github/agents/change-impact.agent.md
+
+.github/agents/backend-integration.agent.md
+
+.github/agents/performance-engineer.agent.md
+
+.github/agents/root-cause-analysis.agent.md
+
+These filenames are examples only.
+
+Choose the final files based on your analysis.
+
+For every custom agent:
+
+- Provide the complete Markdown file.
+- Include valid supported frontmatter.
+- Define its name.
+- Define its description.
+- Declare tools where supported and necessary.
+- Include its complete role instructions.
+- Include repository-specific workflows.
+- Include guardrails.
+- Include output requirements.
+
+Do not invent unsupported configuration fields or tool identifiers.
+
+If the installed Copilot version does not support a capability, explain the limitation and provide a supported alternative.
+
+C. Reusable agent skills
+
+Determine whether reusable skills would reduce duplication across agents.
+
+Consider a structure such as:
+
+.github/skills/[skill-name]/SKILL.md
+
+Potential skills:
+
+- Trace a request end to end.
+- Analyze a CompletableFuture chain.
+- Review Resilience4j configuration.
+- Generate backend failure tests.
+- Analyze a GraphQL query.
+- Validate an API mapping.
+- Investigate a production stack trace.
+
+For each recommended skill:
+
+1. Explain why it should be a skill.
+2. Provide its exact location.
+3. Generate its complete SKILL.md contents.
+4. Define activation criteria.
+5. Define required inputs.
+6. Define steps.
+7. Define expected outputs.
+8. Define validation and safety rules.
+
+Ensure any included frontmatter complies with the supported skill format.
+
+D. MCP integration recommendations
+
+Analyze whether the agents would benefit from external MCP servers.
+
+Potential capabilities:
+
+- IntelliJ project inspection.
+- IntelliJ debugger access.
+- GitHub repository access.
+- CI/CD results.
+- Splunk log investigation.
+- Prometheus metrics.
+- Kubernetes/OpenShift read-only inspection.
+- API specification retrieval.
+- Documentation search.
+
+For each proposed MCP integration:
+
+- Describe its value.
+- Identify which agent uses it.
+- State whether an approved connector is already available.
+- State required permissions.
+- Recommend read-only access where possible.
+- Explain credential management.
+- Explain data exposure risks.
+- Provide installation/configuration steps only when verified.
+
+Do not claim that a generic named MCP server exists without verification.
+
+E. Repository knowledge structure
+
+Recommend a maintainable documentation structure for agent knowledge.
+
+For example:
+
+docs/ai/architecture/
+
+docs/ai/integrations/
+
+docs/ai/business-rules/
+
+docs/ai/operations/
+
+docs/ai/agent-evaluations/
+
+Adapt the structure to existing repository conventions.
+
+Avoid duplicating documentation unnecessarily.
+
+Generate recommended content outlines.
+
+---
+
+SECTION 9 — PHASE G: AI-DLC WORKFLOW INTEGRATION
+
+Design a practical AI-DLC-based engineering workflow for this brownfield application.
+
+Use the established AI-DLC principles of:
+
+- Brownfield reverse engineering.
+- Requirements analysis.
+- Architecture and design.
+- Implementation planning.
+- Construction.
+- Verification.
+- Operations.
+- Human approval gates.
+- Reusable knowledge artifacts.
+
+If an official AI-DLC workflow implementation is already installed in the project, inspect it and preserve its existing conventions.
+
+Otherwise, propose a compatible conceptual workflow.
+
+Do not claim a custom workflow is an official AWS AI-DLC stage implementation.
+
+Workflow 1: New REST API enhancement
+
+Explain which agents execute when a developer requests a new endpoint or response field.
+
+Define:
+
+- Agent order.
+- Required artifacts.
+- Approval gates.
+- Tests.
+- Completion criteria.
+
+Workflow 2: New backend integration
+
+Design the workflow for integrating a new GraphQL, REST, SOAP, or MQ source.
+
+Include:
+
+- Contract analysis.
+- Backend client design.
+- Data mapping.
+- Concurrency analysis.
+- Resilience design.
+- Integration tests.
+- Regression tests.
+- Deployment considerations.
+
+Workflow 3: Production issue investigation
+
+Design an investigation workflow using:
+
+- Exception evidence.
+- Logs.
+- Request correlation.
+- Code tracing.
+- Backend dependency analysis.
+- Root-cause hypotheses.
+- Reproduction.
+- Regression test design.
+- Proposed fix.
+
+Workflow 4: Performance improvement
+
+Design a workflow to investigate slow REST aggregation.
+
+Include:
+
+- Critical path analysis.
+- Backend call timing.
+- Executor analysis.
+- Connection pool analysis.
+- Timeout budgets.
+- Load testing.
+- Before/after measurements.
+
+Workflow 5: Safe refactoring
+
+Design a workflow for modernizing existing code without breaking behavior.
+
+Include:
+
+- Baseline behavior discovery.
+- Dependency analysis.
+- Test gap assessment.
+- Refactoring plan.
+- Incremental changes.
+- Regression validation.
+
+For every workflow, generate a Mermaid diagram showing agent handoffs and approval gates.
+
+---
+
+SECTION 10 — PHASE H: AGENT COLLABORATION AND ORCHESTRATION
+
+Determine whether this project benefits from a coordinating agent.
+
+If yes, design an AI-DLC Engineering Orchestrator.
+
+Its responsibilities should include:
+
+1. Classifying the incoming task.
+2. Identifying required specialists.
+3. Loading relevant repository knowledge.
+4. Defining task scope.
+5. Planning agent execution.
+6. Tracking intermediate artifacts.
+7. Preventing conflicting modifications.
+8. Coordinating validation.
+9. Enforcing approval gates.
+10. Producing the final engineering summary.
+
+Important:
+
+Do not assume custom Copilot agents can automatically invoke one another.
+
+Verify actual orchestration and handoff capabilities in the available Copilot environment.
+
+If automatic orchestration is unavailable, design a manual or workflow-driven alternative.
+
+Differentiate:
+
+- Actual autonomous coordination.
+- Sequential agent selection.
+- Reusable prompts.
+- AI-DLC stage orchestration.
+- External automation.
+
+Provide a realistic implementation approach.
+
+---
+
+SECTION 11 — PHASE I: IMPLEMENTATION ROADMAP
+
+Develop an incremental implementation plan.
+
+Stage 1: Foundation
+
+Implement:
+
+- Repository-specific Copilot instructions.
+- Architecture knowledge.
+- Agent design standards.
+- Agent evaluation criteria.
+
+Stage 2: First high-value agents
+
+Choose approximately three to five agents based on the repository analysis.
+
+Explain why they are the best starting point.
+
+Stage 3: Specialized engineering agents
+
+Introduce additional agents for complex integrations, concurrency, performance, testing, and debugging.
+
+Stage 4: AI-DLC workflow integration
+
+Connect agents to repeatable lifecycle activities and approval gates.
+
+Stage 5: Observability and advanced operations
+
+Introduce read-only production investigation capabilities only when authorized and available.
+
+For every stage include:
+
+- Objectives.
+- Deliverables.
+- Required configuration.
+- Dependencies.
+- Risks.
+- Human effort.
+- Evaluation criteria.
+- Completion checklist.
+
+Do not recommend creating every agent simultaneously.
+
+---
+
+SECTION 12 — PHASE J: PRACTICAL AGENT EVALUATION
+
+Create a test framework to evaluate the proposed agents.
+
+Select realistic scenarios from the actual repository.
+
+Examples:
+
+- Trace a complex REST request.
+- Identify every backend source used by an endpoint.
+- Investigate a failed CompletableFuture.
+- Review circuit breaker configuration.
+- Generate tests for a mapping utility.
+- Find why a GraphQL response field is null.
+- Analyze a potential connection pool bottleneck.
+- Explain MQ retry behavior.
+- Identify changes affecting multiple endpoints.
+- Investigate an exception using a stack trace.
+
+For each scenario, define:
+
+1. Test prompt.
+2. Required repository context.
+3. Expected findings.
+4. Evidence requirements.
+5. Accuracy criteria.
+6. Safety requirements.
+7. Pass/fail conditions.
+
+Compare specialized-agent performance against normal Copilot Agent Mode.
+
+Measure:
+
+- Investigation accuracy.
+- Unsupported claims.
+- Correct file identification.
+- Useful test generation.
+- Time to completion.
+- Unnecessary file changes.
+- Human correction effort.
+
+Recommend retaining only agents that demonstrate measurable value.
+
+---
+
+SECTION 13 — REQUIRED FINAL DELIVERABLES
+
+Produce the following outputs in order.
+
+Deliverable 1: Executive architecture summary
+
+A concise explanation of what this application does, its main components, and its integration complexity.
+
+Deliverable 2: Comprehensive architecture analysis
+
+Include:
+
+- Technology stack.
+- Module inventory.
+- Layer diagram.
+- Backend dependency map.
+- Request flow diagrams.
+- Concurrency architecture.
+- Resilience architecture.
+- Testing architecture.
+- Operational architecture.
+
+Deliverable 3: Repository coverage report
+
+List:
+
+- Areas examined.
+- Important files reviewed.
+- Areas not examined.
+- Analysis limitations.
+- Remaining unknowns.
+
+Deliverable 4: Engineering challenges and opportunities
+
+Provide an evidence-based table of engineering pain points.
+
+Deliverable 5: Ranked agent recommendations
+
+Include:
+
+- Agent name.
+- Priority.
+- Score.
+- Evidence.
+- Expected value.
+- Complexity.
+- Implementation approach.
+
+Deliverable 6: Detailed agent specifications
+
+Provide the complete design described in Section 7 for every P0/P1 recommendation.
+
+Deliverable 7: Ready-to-use Copilot configurations
+
+Provide complete proposed contents for:
+
+- Repository instructions.
+- Custom agent definition files.
+- Reusable skill files.
+- Any required supporting documentation.
+
+Include exact paths.
+
+Deliverable 8: AI-DLC workflow architecture
+
+Include workflows for:
+
+- Feature development.
+- Backend integration.
+- Debugging.
+- Performance improvement.
+- Refactoring.
+
+Deliverable 9: IntelliJ setup guide
+
+Provide exact instructions for:
+
+- Configuring Copilot.
+- Creating custom agent files.
+- Adding skills.
+- Verifying instructions are loaded.
+- Selecting and invoking agents.
+- Testing each agent.
+- Troubleshooting configuration problems.
+
+Distinguish verified steps from steps requiring local confirmation.
+
+Deliverable 10: Prioritized rollout plan
+
+Provide an actionable implementation sequence and realistic success criteria.
+
+---
+
+SECTION 14 — ANALYSIS QUALITY REQUIREMENTS
+
+Your work must be:
+
+- Repository-specific.
+- Evidence-based.
+- Detailed.
+- Technically accurate.
+- Maintainable.
+- Security-conscious.
+- Enterprise-ready.
+- Compatible with existing architecture.
+- Practical for IntelliJ users.
+- Aligned with AI-DLC principles.
+
+Avoid:
+
+- Generic AI agent lists.
+- Unsupported claims.
+- Imaginary classes.
+- Assumed backend behavior.
+- Duplicated agent responsibilities.
+- Excessively broad agent permissions.
+- Unnecessary architectural changes.
+- Unverified configuration syntax.
+- Recommendations lacking measurable value.
+
+Do not force all analysis into one response.
+
+If necessary, divide the work into multiple clearly numbered analysis stages.
+
+Maintain a coverage checklist and explicitly state what is complete and what remains.
+
+---
+
+SECTION 15 — EXECUTION INSTRUCTIONS
+
+Begin now.
+
+STEP 1 — DISCOVER
+
+Inspect the current repository structure and identify the actual technology stack, modules, integration points, and existing AI configuration.
+
+STEP 2 — PLAN
+
+Present a structured repository analysis plan showing the components and questions you will investigate.
+
+STEP 3 — ANALYZE
+
+Perform comprehensive brownfield reverse engineering.
+
+Work systematically, trace representative execution paths, and collect evidence.
+
+STEP 4 — ASSESS
+
+Identify real engineering problems and opportunities for specialized agents.
+
+STEP 5 — RECOMMEND
+
+Produce a prioritized list of agents justified by repository evidence.
+
+STEP 6 — DESIGN
+
+For each recommended P0/P1 agent, produce detailed implementation specifications and complete proposed configuration files.
+
+STEP 7 — INTEGRATE
+
+Design an AI-DLC workflow connecting the agents, knowledge artifacts, and human approval gates.
+
+STEP 8 — REVIEW
+
+Summarize your findings and recommend which agents should be implemented first.
+
+STOP BEFORE IMPLEMENTATION.
+
+Do not create or modify repository files until I approve the proposed agent architecture and implementation plan.
+
+Your first response should summarize your initial repository inventory and proposed analysis sequence. Then proceed with the detailed discovery, using subsequent responses as needed.
+
+The ultimate goal is to create a highly capable, repository-aware, maintainable AI agent ecosystem that makes development and support of this existing enterprise service significantly more efficient, accurate, reliable, and scalable.
